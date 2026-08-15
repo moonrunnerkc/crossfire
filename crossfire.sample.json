@@ -1,0 +1,39 @@
+{
+  "task": "Find and close memory safety and injection bugs in the target's request parsing path",
+  "target": {
+    "repoPath": "./fixtures/vulnerable-repo",
+    "inScopeDirs": ["src"],
+    "excludedPaths": ["build/**", "vendor/**"],
+    "testCommand": "python -m pytest -q"
+  },
+  "loop": {
+    "iterationCap": 5,
+    "severityBar": "medium",
+    "turnTimeoutMs": 300000
+  },
+  "detectors": {
+    "semgrep": {
+      "enabled": true,
+      "ruleset": "p/security-audit",
+      "timeBudgetMs": 120000
+    },
+    "osvScanner": {
+      "enabled": true,
+      "lockfiles": ["requirements.txt"],
+      "timeBudgetMs": 60000
+    },
+    "fuzz": {
+      "enabled": true,
+      "timeBudgetMs": 300000,
+      "harnesses": [
+        {
+          "id": "parse-request",
+          "language": "python",
+          "engine": "atheris",
+          "entryPoint": "fuzz/parse_request_harness.py",
+          "corpusDir": "fuzz/corpus/parse-request"
+        }
+      ]
+    }
+  }
+}
