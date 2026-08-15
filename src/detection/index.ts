@@ -13,7 +13,8 @@ export type { DedupeResult } from "./identity.js";
 
 export { createSemgrepScanner, normalizeSemgrepOutput } from "./semgrep.js";
 export { createOsvScanner, normalizeOsvOutput } from "./osv-scanner.js";
-export { runScanners, scopeOf } from "./scan.js";
+export { runScanners } from "./scan.js";
+export { partitionByScope, scopeOf } from "./scope.js";
 
 export { parseCrashReport, resolveRepoFile } from "./crash-report.js";
 export type { CrashFrame, CrashReport } from "./crash-report.js";

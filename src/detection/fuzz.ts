@@ -2,7 +2,7 @@ import type { FuzzEngine as FuzzEngineId, RunConfig } from "../config/index.js";
 import type { DetectorRun, Finding } from "../contracts/index.js";
 import { dedupeFindings } from "./identity.js";
 import { createLibFuzzerEngine } from "./libfuzzer.js";
-import { scopeOf } from "./scan.js";
+import { scopeOf } from "./scope.js";
 import type { DetectionResult, FuzzEngine } from "./types.js";
 
 /** Fixed so a run is reproducible; override per run when you want variety. */

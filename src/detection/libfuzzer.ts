@@ -76,6 +76,15 @@ async function runLibFuzzer(job: FuzzJob): Promise<DetectorOutcome> {
     findings: [],
   });
 
+  // The harness and its corpus are read and executed like any other path, so
+  // they answer to the same exclusion set the agents do.
+  for (const path of [harness.entryPoint, harness.corpusDir]) {
+    const decision = scope.pathScope.check(path);
+    if (!decision.allowed) {
+      return failed(`harness ${harness.id} is out of scope: ${decision.reason}`);
+    }
+  }
+
   const binary = resolve(scope.repoPath, harness.entryPoint);
   if (!existsSync(binary)) {
     return failed(`harness binary ${harness.entryPoint} is not built`);

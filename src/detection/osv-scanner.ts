@@ -6,6 +6,7 @@ import type { RunConfig } from "../config/index.js";
 import type { Finding, Severity } from "../contracts/index.js";
 import { runTool, shellQuote } from "./exec.js";
 import { scaFindingId } from "./identity.js";
+import { partitionByScope } from "./scope.js";
 import type { DetectionScope, DetectorOutcome, Scanner } from "./types.js";
 
 type OsvConfig = RunConfig["detectors"]["osvScanner"];
@@ -77,10 +78,24 @@ export function createOsvScanner(config: OsvConfig): Scanner {
     id: "osv-scanner",
 
     async scan(scope: DetectionScope): Promise<DetectorOutcome> {
+      const lockfiles = partitionByScope(scope, config.lockfiles);
+      if (lockfiles.allowed.length === 0) {
+        return {
+          run: {
+            detector: "osv-scanner",
+            status: "skipped",
+            duration_ms: 0,
+            findings_emitted: 0,
+            note: "every configured lockfile is outside the scope or excluded",
+          },
+          findings: [],
+        };
+      }
+
       const args = [
         "scan",
         "source",
-        ...config.lockfiles.map((lockfile) => `--lockfile=${lockfile}`),
+        ...lockfiles.allowed.map((lockfile) => `--lockfile=${lockfile}`),
         "--format=json",
       ];
 
@@ -141,7 +156,14 @@ export function createOsvScanner(config: OsvConfig): Scanner {
 
       const findings = normalizeOsvOutput(output.data, scope.repoPath);
       return {
-        run: { ...base, status: "ok", findings_emitted: findings.length },
+        run: {
+          ...base,
+          status: "ok",
+          findings_emitted: findings.length,
+          ...(lockfiles.denied.length > 0
+            ? { note: `skipped excluded lockfiles: ${lockfiles.denied.join(", ")}` }
+            : {}),
+        },
         findings,
       };
     },

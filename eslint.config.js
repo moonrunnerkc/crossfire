@@ -2,7 +2,9 @@ import js from "@eslint/js";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["dist/**", "node_modules/**", "fixtures/vulnerable-repo/**", "runs/**"] },
+  // fixtures/ holds deliberately insecure code and a hand-written fake agent,
+  // neither of which is production surface.
+  { ignores: ["dist/**", "node_modules/**", "fixtures/**", "runs/**"] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

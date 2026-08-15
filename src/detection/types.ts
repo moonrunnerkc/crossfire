@@ -1,11 +1,17 @@
 import type { FuzzEngine as FuzzEngineId, FuzzHarnessConfig } from "../config/index.js";
 import type { DetectorRun, Finding } from "../contracts/index.js";
+import type { PathScope } from "../policy/index.js";
 
-/** The slice of the target a detector is allowed to look at. */
+/**
+ * The slice of the target a detector is allowed to look at. Detectors run under
+ * the same exclusion set as the agents: a scanner that reads .env is as much of
+ * a leak as an agent that does.
+ */
 export interface DetectionScope {
   repoPath: string;
   inScopeDirs: readonly string[];
   excludedPaths: readonly string[];
+  pathScope: PathScope;
 }
 
 /**

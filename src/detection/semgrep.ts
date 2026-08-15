@@ -4,6 +4,7 @@ import type { RunConfig } from "../config/index.js";
 import type { Finding, Severity } from "../contracts/index.js";
 import { runTool, shellQuote } from "./exec.js";
 import { sastFindingId, toSlug } from "./identity.js";
+import { partitionByScope } from "./scope.js";
 import type { DetectionScope, DetectorOutcome, Scanner } from "./types.js";
 
 type SemgrepConfig = RunConfig["detectors"]["semgrep"];
@@ -107,6 +108,22 @@ export function createSemgrepScanner(config: SemgrepConfig): Scanner {
     id: "semgrep",
 
     async scan(scope: DetectionScope): Promise<DetectorOutcome> {
+      // Two layers: excluded directories never reach the command line, and
+      // --exclude keeps semgrep out of anything excluded further down the tree.
+      const targets = partitionByScope(scope, scope.inScopeDirs);
+      if (targets.allowed.length === 0) {
+        return {
+          run: {
+            detector: "semgrep",
+            status: "skipped",
+            duration_ms: 0,
+            findings_emitted: 0,
+            note: "every in-scope directory is excluded",
+          },
+          findings: [],
+        };
+      }
+
       const args = [
         "scan",
         "--config",
@@ -116,7 +133,7 @@ export function createSemgrepScanner(config: SemgrepConfig): Scanner {
         "--metrics=off",
         "--disable-version-check",
         ...scope.excludedPaths.flatMap((pattern) => ["--exclude", pattern]),
-        ...scope.inScopeDirs,
+        ...targets.allowed,
       ];
 
       const result = await runTool("semgrep", args, {
@@ -124,6 +141,10 @@ export function createSemgrepScanner(config: SemgrepConfig): Scanner {
         timeoutMs: config.timeBudgetMs,
       });
 
+      const notes =
+        targets.denied.length === 0
+          ? []
+          : [`skipped excluded directories: ${targets.denied.join(", ")}`];
       const base = { detector: "semgrep", duration_ms: result.durationMs } as const;
 
       if (result.spawnError !== undefined) {
@@ -174,14 +195,18 @@ export function createSemgrepScanner(config: SemgrepConfig): Scanner {
 
       const findings = normalizeSemgrepOutput(output.data, config);
       const scanErrors = output.data.errors ?? [];
+      if (scanErrors.length > 0) {
+        notes.push(
+          `semgrep reported ${scanErrors.length} scan error(s): ${scanErrors[0]?.message ?? ""}`,
+        );
+      }
+
       return {
         run: {
           ...base,
           status: "ok",
           findings_emitted: findings.length,
-          ...(scanErrors.length > 0
-            ? { note: `semgrep reported ${scanErrors.length} scan error(s): ${scanErrors[0]?.message ?? ""}` }
-            : {}),
+          ...(notes.length > 0 ? { note: notes.join("; ") } : {}),
         },
         findings,
       };

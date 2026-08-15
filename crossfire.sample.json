@@ -3,7 +3,6 @@
   "target": {
     "repoPath": "./fixtures/vulnerable-repo",
     "inScopeDirs": ["src"],
-    "excludedPaths": ["build/**", ".crossfire/**"],
     "testCommand": "./test.sh"
   },
   "loop": {

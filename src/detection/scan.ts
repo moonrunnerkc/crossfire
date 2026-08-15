@@ -2,16 +2,9 @@ import type { RunConfig } from "../config/index.js";
 import type { DetectorRun, Finding } from "../contracts/index.js";
 import { dedupeFindings } from "./identity.js";
 import { createOsvScanner } from "./osv-scanner.js";
+import { scopeOf } from "./scope.js";
 import { createSemgrepScanner } from "./semgrep.js";
-import type { DetectionResult, DetectionScope, Scanner } from "./types.js";
-
-export function scopeOf(config: RunConfig): DetectionScope {
-  return {
-    repoPath: config.target.repoPath,
-    inScopeDirs: config.target.inScopeDirs,
-    excludedPaths: config.target.excludedPaths,
-  };
-}
+import type { DetectionResult, Scanner } from "./types.js";
 
 function skipped(detector: DetectorRun["detector"]): DetectorRun {
   return {
