@@ -15,6 +15,9 @@ export type { ConfirmationState, Finding, FindingSource, FindingsBatch } from ".
 export { AGENT_IDS, AgentIdSchema, FixReportSchema, FixSchema } from "./fix-report.js";
 export type { AgentId, Fix, FixReport } from "./fix-report.js";
 
+export { CandidateVerdictSchema, CrashAnalysisSchema } from "./analysis.js";
+export type { CandidateVerdict, CrashAnalysis } from "./analysis.js";
+
 export { AgentEventSchema, STOP_REASONS, StopReasonSchema } from "./agent-event.js";
 export type { AgentEvent, StopReason } from "./agent-event.js";
 

@@ -1,0 +1,203 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`candidate confirmation prompt > renders a stable prompt from one scanner candidate 1`] = `
+"You are confirming or dismissing one scanner candidate in the target repository.
+A static scanner matched a pattern here. A pattern is not proof, so this is a
+candidate until a repro demonstrates it.
+
+Run: Find and close memory safety bugs in the target's request parsing path
+In scope directories: src
+Working directory: the target repository root. Every path below is relative to it.
+
+Candidate
+  finding id: sast-90ab12cd34ef
+  class: insecure-strcpy
+  severity as reported: medium
+  location: src/parse_request.c:28
+  what the scanner flagged: strcpy writes an unbounded request path into a 32 byte buffer
+
+Do this
+1. Read the flagged code and decide whether the defect is reachable with input the program accepts.
+2. If it is reachable, build a command that demonstrates it and run that command to check it fails today.
+3. If it is not reachable, or the scanner matched something that is not a defect, dismiss it and say why.
+
+The repro command convention (the broker runs the command and reads only its exit code):
+  exit 0 means the bug is still present
+  any non-zero exit means the bug is gone
+It must be deterministic, take no arguments, and run from the repository root.
+The broker runs your repro command itself before this candidate can enter a
+fix round. A command that does not exit 0 against the code as it stands
+dismisses the candidate, whatever the verdict below says.
+
+You have read and execute access to the repository. You cannot write source;
+a separate agent applies fixes. Paths outside the in scope directories are
+refused by the broker rather than by you.
+
+Answer with one JSON object and nothing else.
+To confirm:
+{
+  "status": "confirmed",
+  "finding_id": "sast-90ab12cd34ef",
+  "severity": "info | low | medium | high | critical",
+  "repro_command": "a shell command following the convention above",
+  "expected_secure_behavior": "what the code should do instead"
+}
+To dismiss:
+{
+  "status": "dismissed",
+  "finding_id": "sast-90ab12cd34ef",
+  "reason": "why this candidate is not a reachable defect"
+}"
+`;
+
+exports[`crash analysis prompt > renders a stable prompt from one confirmed crash 1`] = `
+"You are analyzing one confirmed crash in the target repository.
+A fuzzer already reproduced it from the recorded input, so whether it is real is settled.
+
+Run: Find and close memory safety bugs in the target's request parsing path
+In scope directories: src
+Working directory: the target repository root. Every path below is relative to it.
+
+Crash
+  finding id: fuzz-4b21c9de7a10
+  class: heap-buffer-overflow
+  severity as detected: high
+  location: src/parse_request.c:32
+  crash artifact: .crossfire/crashes/parse-request/fuzz-4b21c9de7a10.min
+  detector repro: ! './build/parse-request-fuzzer' -timeout=25 '.crossfire/crashes/parse-request/fuzz-4b21c9de7a10.min'
+  what the detector recorded: heap-buffer-overflow reproduced by the parse-request harness. Crash stack: parse_request (parse_request.c:32) <- LLVMFuzzerTestOneInput (parse_request_harness.c:19).
+
+Do this
+1. Read the code at the crash site and the frames around it.
+2. Replay the crash artifact through the harness with the detector repro above.
+3. Work out the root cause: the specific defect, not the symptom the sanitizer printed.
+4. Author the repro command the broker will use to check every future fix of this crash.
+
+The repro command convention (the broker runs the command and reads only its exit code):
+  exit 0 means the bug is still present
+  any non-zero exit means the bug is gone
+It must be deterministic, take no arguments, and run from the repository root.
+
+You have read and execute access to the repository. You cannot write source;
+a separate agent applies fixes. Paths outside the in scope directories are
+refused by the broker rather than by you.
+
+Answer with one JSON object and nothing else:
+{
+  "finding_id": "fuzz-4b21c9de7a10",
+  "root_cause": "the defect, in one or two sentences",
+  "severity": "info | low | medium | high | critical",
+  "repro_command": "a shell command following the convention above",
+  "expected_secure_behavior": "what the code should do with this input instead"
+}"
+`;
+
+exports[`fix prompt > renders a stable prompt from a confirmed batch 1`] = `
+"You are fixing confirmed findings in the target repository.
+Each one below was reproduced mechanically: its repro command exits 0 today
+because the defect is present.
+
+Run: Find and close memory safety bugs in the target's request parsing path
+In scope directories: src
+Working directory: the target repository root. Every path below is relative to it.
+Round: 2
+
+Findings (2)
+1. fuzz-4b21c9de7a10  heap-buffer-overflow  severity high
+   location: src/parse_request.c:32
+   what it is: heap-buffer-overflow reproduced by the parse-request harness. Crash stack: parse_request (parse_request.c:32) <- LLVMFuzzerTestOneInput (parse_request_harness.c:19).
+   repro: ! './build/parse-request-fuzzer' -timeout=25 '.crossfire/crashes/parse-request/fuzz-4b21c9de7a10.min'
+   expected secure behavior: the parse-request harness returns normally for the recorded input instead of aborting with heap-buffer-overflow.
+   crash artifact: .crossfire/crashes/parse-request/fuzz-4b21c9de7a10.min
+
+2. sast-90ab12cd34ef  insecure-strcpy  severity medium
+   location: src/parse_request.c:28
+   what it is: strcpy writes an unbounded request path into a 32 byte buffer
+   repro: false
+   expected secure behavior: the copy is bounded by the size of the destination buffer
+
+What done means
+Every repro command above must exit non-zero after your change, and the
+target's own test suite must still pass: ./test.sh
+The broker re-runs each repro and that suite itself, so a fix that does not
+flip its repro does not count, however well it reads.
+
+Constraints
+- Change only files under the in scope directories.
+- Do not weaken or delete a repro, a test, or a harness to make a check pass.
+- Fix the defect the finding describes, not the symptom its repro happens to trip.
+- Leave findings that are not listed above alone.
+
+Answer with one JSON object and nothing else:
+{
+  "round": 2,
+  "agent": "claude",
+  "fixes": [
+    {
+      "finding_id": "the id of the finding this fix closes",
+      "files_changed": ["paths you edited"],
+      "summary": "what you changed and why it closes the finding"
+    }
+  ]
+}"
+`;
+
+exports[`fix prompt > renders a stable prompt when a round has a diff to carry 1`] = `
+"You are fixing confirmed findings in the target repository.
+Each one below was reproduced mechanically: its repro command exits 0 today
+because the defect is present.
+
+Run: Find and close memory safety bugs in the target's request parsing path
+In scope directories: src
+Working directory: the target repository root. Every path below is relative to it.
+Round: 2
+
+Findings (2)
+1. fuzz-4b21c9de7a10  heap-buffer-overflow  severity high
+   location: src/parse_request.c:32
+   what it is: heap-buffer-overflow reproduced by the parse-request harness. Crash stack: parse_request (parse_request.c:32) <- LLVMFuzzerTestOneInput (parse_request_harness.c:19).
+   repro: ! './build/parse-request-fuzzer' -timeout=25 '.crossfire/crashes/parse-request/fuzz-4b21c9de7a10.min'
+   expected secure behavior: the parse-request harness returns normally for the recorded input instead of aborting with heap-buffer-overflow.
+   crash artifact: .crossfire/crashes/parse-request/fuzz-4b21c9de7a10.min
+
+2. sast-90ab12cd34ef  insecure-strcpy  severity medium
+   location: src/parse_request.c:28
+   what it is: strcpy writes an unbounded request path into a 32 byte buffer
+   repro: false
+   expected secure behavior: the copy is bounded by the size of the destination buffer
+
+What done means
+Every repro command above must exit non-zero after your change, and the
+target's own test suite must still pass: ./test.sh
+The broker re-runs each repro and that suite itself, so a fix that does not
+flip its repro does not count, however well it reads.
+
+Constraints
+- Change only files under the in scope directories.
+- Do not weaken or delete a repro, a test, or a harness to make a check pass.
+- Fix the defect the finding describes, not the symptom its repro happens to trip.
+- Leave findings that are not listed above alone.
+
+Changes earlier rounds already made (git diff):
+diff --git a/src/parse_request.c b/src/parse_request.c
+index 1111111..2222222 100644
+--- a/src/parse_request.c
++++ b/src/parse_request.c
+@@ -20,7 +20,7 @@ int parse_request(const char *line, struct request *out) {
+-  strcpy(out->path, path);
++  memcpy(out->path, path, path_len + 1);
+
+
+Answer with one JSON object and nothing else:
+{
+  "round": 2,
+  "agent": "claude",
+  "fixes": [
+    {
+      "finding_id": "the id of the finding this fix closes",
+      "files_changed": ["paths you edited"],
+      "summary": "what you changed and why it closes the finding"
+    }
+  ]
+}"
+`;
