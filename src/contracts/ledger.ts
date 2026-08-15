@@ -25,6 +25,8 @@ export const VerifyResultSchema = z.strictObject({
   outcome: z.enum(VERIFY_OUTCOMES),
   exit_code: z.number().int().nullable(),
   duration_ms: durationMs,
+  /** Why an outcome is inconclusive. An unexplained one is unauditable. */
+  note: z.string().min(1).optional(),
 });
 
 export const TestResultSchema = z.strictObject({
@@ -32,6 +34,8 @@ export const TestResultSchema = z.strictObject({
   command: z.string().min(1),
   exit_code: z.number().int().nullable(),
   duration_ms: durationMs,
+  /** Why the suite failed when the exit code alone does not say, for example a timeout. */
+  note: z.string().min(1).optional(),
 });
 
 export const LedgerEntryBodySchema = z.strictObject({
