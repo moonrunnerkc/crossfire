@@ -1,0 +1,12 @@
+rules:
+  - id: crossfire-insecure-strcpy
+    languages: [c]
+    severity: ERROR
+    message: >-
+      strcpy copies until a NUL byte with no regard for the size of the
+      destination, so a caller controlled source overflows a fixed size buffer.
+      Bound the copy against sizeof(destination).
+    metadata:
+      category: security
+      cwe: "CWE-787: Out-of-bounds Write"
+    pattern: strcpy($DST, $SRC)

@@ -48,7 +48,7 @@ describe("loadRunConfig", () => {
     expect(config.task.length).toBeGreaterThan(0);
     expect(config.target.inScopeDirs.length).toBeGreaterThan(0);
     expect(config.detectors.fuzz.harnesses.length).toBeGreaterThan(0);
-    expect(config.detectors.fuzz.harnesses[0]?.engine).toBe("atheris");
+    expect(config.detectors.fuzz.harnesses[0]?.engine).toBe("libfuzzer");
   });
 
   test("resolves the target repo path against the config file directory", () => {

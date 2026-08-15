@@ -1,10 +1,10 @@
 {
-  "task": "Find and close memory safety and injection bugs in the target's request parsing path",
+  "task": "Find and close memory safety bugs in the target's request parsing path",
   "target": {
     "repoPath": "./fixtures/vulnerable-repo",
     "inScopeDirs": ["src"],
-    "excludedPaths": ["build/**", "vendor/**"],
-    "testCommand": "python -m pytest -q"
+    "excludedPaths": ["build/**", ".crossfire/**"],
+    "testCommand": "./test.sh"
   },
   "loop": {
     "iterationCap": 5,
@@ -14,12 +14,12 @@
   "detectors": {
     "semgrep": {
       "enabled": true,
-      "ruleset": "p/security-audit",
+      "ruleset": ".semgrep/crossfire-c.yml",
       "timeBudgetMs": 120000
     },
     "osvScanner": {
       "enabled": true,
-      "lockfiles": ["requirements.txt"],
+      "lockfiles": ["package-lock.json"],
       "timeBudgetMs": 60000
     },
     "fuzz": {
@@ -28,9 +28,9 @@
       "harnesses": [
         {
           "id": "parse-request",
-          "language": "python",
-          "engine": "atheris",
-          "entryPoint": "fuzz/parse_request_harness.py",
+          "language": "c",
+          "engine": "libfuzzer",
+          "entryPoint": "build/parse-request-fuzzer",
           "corpusDir": "fuzz/corpus/parse-request"
         }
       ]
