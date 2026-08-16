@@ -21,7 +21,7 @@ Only Node and git are needed for a `--dry-run`. Platform notes and the full inst
 ## Quick start
 
 ```sh
-git clone git@github.com:moonrunnerkc/crossfire.git
+git clone https://github.com/moonrunnerkc/crossfire.git
 cd crossfire
 npm install && npm run check
 ```

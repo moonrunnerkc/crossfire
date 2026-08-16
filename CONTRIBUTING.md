@@ -5,7 +5,7 @@ The rules this repo is built under are in [CLAUDE.md](CLAUDE.md). Read those fir
 ## Setup
 
 ```sh
-git clone git@github.com:moonrunnerkc/crossfire.git
+git clone https://github.com/moonrunnerkc/crossfire.git
 cd crossfire
 npm install
 npm run check

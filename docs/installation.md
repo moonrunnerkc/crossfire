@@ -21,7 +21,7 @@ Node and git alone are enough for `--dry-run`. The rest only matter when you poi
 ## Build from source
 
 ```sh
-git clone git@github.com:moonrunnerkc/crossfire.git
+git clone https://github.com/moonrunnerkc/crossfire.git
 cd crossfire
 npm install
 npm run build
