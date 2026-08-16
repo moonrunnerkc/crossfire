@@ -4,5 +4,8 @@ export type { VerifyOptions } from "./verify.js";
 export { DEFAULT_TEST_TIMEOUT_MS, runTestGate, runTests } from "./test-gate.js";
 export type { TestGateOptions, TestGateOutcome } from "./test-gate.js";
 
+export { DEFAULT_BUILD_TIMEOUT_MS, runBuild } from "./build.js";
+export type { BuildOptions, BuildOutcome } from "./build.js";
+
 export { DEFAULT_REFUZZ_BUDGET_MS, refuzzCrossCheck } from "./refuzz.js";
 export type { RefuzzOptions, RefuzzOutcome } from "./refuzz.js";

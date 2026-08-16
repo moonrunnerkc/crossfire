@@ -94,15 +94,21 @@ function ledgerPath(): string {
   return join(mkdtempSync(join(tmpdir(), "crossfire-run-")), "ledger.jsonl");
 }
 
-function configFor(repoPath: string, loop: Partial<RunConfig["loop"]> = {}): RunConfig {
+function configFor(
+  repoPath: string,
+  loop: Partial<RunConfig["loop"]> = {},
+  buildCommand?: string,
+): RunConfig {
   const base = loadRunConfig(SAMPLE_CONFIG);
+  const target = { ...base.target, repoPath, inScopeDirs: ["src"], testCommand: "./run-tests.sh" };
+  // The sample builds its own target; these rounds bring their own build script
+  // only when the test is about one.
+  delete target.buildCommand;
   return {
     ...base,
     target: {
-      ...base.target,
-      repoPath,
-      inScopeDirs: ["src"],
-      testCommand: "./run-tests.sh",
+      ...target,
+      ...(buildCommand === undefined ? {} : { buildCommand }),
     },
     loop: { ...base.loop, iterationCap: 3, turnTimeoutMs: 10_000, ...loop },
   };
@@ -603,6 +609,81 @@ describe("a candidate cannot enter a fix round without a passing repro", () => {
       finding_id: CANDIDATE.id,
       outcome: "closed",
     });
+  });
+});
+
+describe("rebuilding the target between the fix and the checks", () => {
+  /** Fails only once the patch has landed, the way a fix that does not compile does. */
+  function buildScript(repoPath: string): void {
+    writeScript(join(repoPath, "build.sh"), "grep -q BROKEN src/app.js && exit 1\nexit 0");
+  }
+
+  test("a fix that does not build leaves its finding unverified, not closed", async () => {
+    const target = makeTarget();
+    buildScript(target);
+    const agents = stubAgents({
+      "crash-analysis": () => analysisOf(CRASH),
+      fix: (turn) => {
+        // Closes the repro and breaks the build in the same edit. Without a
+        // rebuild the stale binary would make this look like a clean fix.
+        writeFileSync(join(target, "src/app.js"), "// BROKEN\n// ADJACENT\n");
+        return fixReportOf(turn, [CRASH.id]);
+      },
+    });
+
+    const result = await runLoop({
+      config: configFor(target, { iterationCap: 1 }, "./build.sh"),
+      ledgerPath: ledgerPath(),
+      detectors: stubDetectors([[CRASH]]),
+      agents,
+    });
+
+    expect(result.reason).toBe("iteration-cap");
+    expect(entries(result)[0]?.verify_results[0]).toMatchObject({
+      finding_id: CRASH.id,
+      outcome: "inconclusive",
+    });
+    expect(entries(result)[0]?.verify_results[0]?.note).toContain("build");
+    expect(result.openFindings.map((finding) => finding.id)).toEqual([CRASH.id]);
+  });
+
+  test("a target that cannot build at all is refused before the first round", async () => {
+    const target = makeTarget();
+    writeScript(join(target, "build.sh"), "echo 'no compiler here' >&2\nexit 1");
+
+    await expect(
+      runLoop({
+        config: configFor(target, {}, "./build.sh"),
+        ledgerPath: ledgerPath(),
+        detectors: stubDetectors([[CRASH]]),
+        agents: stubAgents({}),
+      }),
+    ).rejects.toThrow(/build/);
+  });
+
+  test("the rebuilt target is what verify and the re-fuzz pass see", async () => {
+    const target = makeTarget();
+    // Stands in for a compiler: the repro reads the built artifact, not the source.
+    writeScript(join(target, "build.sh"), "cp src/app.js build.out");
+    writeFileSync(join(target, "build.out"), "// VULNERABLE\n");
+    const built: Finding = { ...CRASH, repro_command: "grep -q VULNERABLE build.out" };
+    const agents = stubAgents({
+      "crash-analysis": () => analysisOf(built),
+      fix: (turn) => {
+        removeMarker(target, "VULNERABLE");
+        return fixReportOf(turn, [built.id]);
+      },
+    });
+
+    const result = await runLoop({
+      config: configFor(target, {}, "./build.sh"),
+      ledgerPath: ledgerPath(),
+      detectors: stubDetectors([[built]]),
+      agents,
+    });
+
+    expect(result.reason).toBe("clean");
+    expect(entries(result)[0]?.verify_results[0]?.outcome).toBe("closed");
   });
 });
 

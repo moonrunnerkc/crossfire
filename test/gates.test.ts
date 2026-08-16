@@ -7,7 +7,13 @@ import { afterAll, describe, expect, test } from "vitest";
 import type { RunConfig } from "../src/config/index.js";
 import { loadRunConfig } from "../src/config/index.js";
 import type { Finding, TestResult } from "../src/contracts/index.js";
-import { refuzzCrossCheck, runTestGate, runTests, verifyFindings } from "../src/gates/index.js";
+import {
+  refuzzCrossCheck,
+  runBuild,
+  runTestGate,
+  runTests,
+  verifyFindings,
+} from "../src/gates/index.js";
 
 const REPO_ROOT = resolve(import.meta.dirname, "..");
 const FIXTURE = resolve(REPO_ROOT, "fixtures/vulnerable-repo");
@@ -57,7 +63,16 @@ afterAll(() => {
 
 function baseConfig(repoPath: string): RunConfig {
   const base = loadRunConfig(SAMPLE_CONFIG);
-  return { ...base, target: { ...base.target, repoPath } };
+  const target = { ...base.target, repoPath };
+  // The sample builds its target; these gates supply their own build command
+  // when they are testing one.
+  delete target.buildCommand;
+  return { ...base, target };
+}
+
+function buildableConfig(repoPath: string, buildCommand: string): RunConfig {
+  const base = baseConfig(repoPath);
+  return { ...base, target: { ...base.target, buildCommand } };
 }
 
 function fuzzConfig(entryPoint: string): RunConfig {
@@ -278,6 +293,42 @@ describe("test gate", () => {
     expect(outcome.result.status).toBe("fail");
     expect(outcome.regressed).toBe(false);
     expect(outcome.note).toContain("baseline");
+  });
+});
+
+describe("build step", () => {
+  test("a target with no build command reports that it was not configured", async () => {
+    const outcome = await runBuild(baseConfig(target));
+
+    expect(outcome.status).toBe("not-configured");
+  });
+
+  test("a build command that succeeds reports ok", async () => {
+    const config = buildableConfig(scriptRepo("buildable", "exit 0"), "./run-tests.sh");
+
+    const outcome = await runBuild(config);
+
+    expect(outcome.status).toBe("ok");
+    expect(outcome.note).toBeUndefined();
+  });
+
+  test("a build command that fails reports why", async () => {
+    const repo = scriptRepo("unbuildable", "echo 'parse_request.c:12: error: expected ;' >&2\nexit 2");
+    const config = buildableConfig(repo, "./run-tests.sh");
+
+    const outcome = await runBuild(config);
+
+    expect(outcome.status).toBe("failed");
+    expect(outcome.note).toContain("error: expected");
+  });
+
+  test("a build command that overruns its timeout fails rather than hanging the round", async () => {
+    const config = buildableConfig(scriptRepo("slow-build", "sleep 5"), "./run-tests.sh");
+
+    const outcome = await runBuild(config, { timeoutMs: 250 });
+
+    expect(outcome.status).toBe("failed");
+    expect(outcome.note).toContain("timed out");
   });
 });
 

@@ -3,6 +3,7 @@
   "target": {
     "repoPath": "./fixtures/vulnerable-repo",
     "inScopeDirs": ["src"],
+    "buildCommand": "./build.sh",
     "testCommand": "./test.sh"
   },
   "loop": {

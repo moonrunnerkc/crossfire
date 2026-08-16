@@ -114,6 +114,12 @@ const TargetSchema = z.strictObject({
     .default([])
     .transform((patterns) => [...new Set([...DEFAULT_EXCLUDED_PATHS, ...patterns])]),
   testCommand: z.string().min(1),
+  /**
+   * Run before the first round and after every fix, so the artifacts the repros
+   * and the fuzzer exercise are built from the patched source. Targets that need
+   * no build step leave it out.
+   */
+  buildCommand: z.string().min(1).optional(),
 });
 
 const LoopSchema = z

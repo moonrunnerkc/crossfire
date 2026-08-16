@@ -6,6 +6,7 @@ import type {
   FixReport,
   LedgerEntry,
   Severity,
+  VerifyResult,
 } from "../contracts/index.js";
 import {
   CandidateVerdictSchema,
@@ -15,7 +16,7 @@ import {
 } from "../contracts/index.js";
 import type { DetectionResult } from "../detection/index.js";
 import type { RefuzzOutcome } from "../gates/index.js";
-import { runTestGate, runTests, verifyFindings } from "../gates/index.js";
+import { runBuild, runTestGate, runTests, verifyFindings } from "../gates/index.js";
 import { LedgerWriter, hashPayload } from "../ledger/index.js";
 import type { SubtaskClass } from "../router/index.js";
 import { routeSubtask } from "../router/index.js";
@@ -85,6 +86,12 @@ export async function runLoop(options: RunOptions): Promise<RunResult> {
   const repoPath = config.target.repoPath;
 
   await assertGitRepo(repoPath);
+  // Detection fuzzes and scans a built target, so the build comes before
+  // anything measures it. A target that cannot build has nothing to say yet.
+  const firstBuild = await runBuild(config);
+  if (firstBuild.status === "failed") {
+    throw new BrokerError(`the target does not build, so the run cannot start: ${firstBuild.note}`);
+  }
   const ledger = new LedgerWriter(options.ledgerPath);
   const baseline = await runTests(config);
   const startSha = await headSha(repoPath);
@@ -265,7 +272,15 @@ export async function runLoop(options: RunOptions): Promise<RunResult> {
       const fixReport = batchFindings.length === 0 ? undefined : await fixBatch(batch);
       throwIfAborted();
 
-      const verifyResults = await verifyFindings(config, batchFindings);
+      // What the repros replay and what the cross-check fuzzes are artifacts of
+      // the patched source, so the rebuild sits between the fix and every check
+      // that judges it. A build that fails leaves nothing judgeable: the round's
+      // findings are inconclusive rather than closed, which keeps them open.
+      const build = fixReport === undefined ? undefined : await runBuild(config);
+      const verifyResults =
+        build?.status === "failed"
+          ? batchFindings.map((finding) => unverifiable(finding, build.note))
+          : await verifyFindings(config, batchFindings);
       const unresolved = batchFindings.filter(
         (_, index) => verifyResults[index]?.outcome !== "closed",
       );
@@ -316,6 +331,16 @@ export async function runLoop(options: RunOptions): Promise<RunResult> {
   }
 
   return finish("iteration-cap");
+}
+
+function unverifiable(finding: Finding, note: string | undefined): VerifyResult {
+  return {
+    finding_id: finding.id,
+    outcome: "inconclusive",
+    exit_code: null,
+    duration_ms: 0,
+    note: note ?? "the target did not build, so its repro could not be run",
+  };
 }
 
 function merge(preferred: readonly Finding[], others: readonly Finding[]): Finding[] {

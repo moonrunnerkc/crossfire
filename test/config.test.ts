@@ -117,6 +117,24 @@ describe("loadRunConfig", () => {
     expect(() => loadRunConfig(writeConfig(raw))).toThrow(/target\.testCommand/);
   });
 
+  test("carries an optional build command, for targets that compile", () => {
+    const raw = minimalConfig();
+    (raw.target as Record<string, unknown>).buildCommand = "./build.sh";
+
+    expect(loadRunConfig(writeConfig(raw)).target.buildCommand).toBe("./build.sh");
+  });
+
+  test("leaves the build command unset when the target needs none", () => {
+    expect(loadRunConfig(writeConfig(minimalConfig())).target.buildCommand).toBeUndefined();
+  });
+
+  test("rejects an empty build command rather than running an empty shell", () => {
+    const raw = minimalConfig();
+    (raw.target as Record<string, unknown>).buildCommand = "";
+
+    expect(() => loadRunConfig(writeConfig(raw))).toThrow(/target\.buildCommand/);
+  });
+
   test("rejects an empty in-scope directory list", () => {
     const raw = minimalConfig();
     (raw.target as Record<string, unknown>).inScopeDirs = [];
