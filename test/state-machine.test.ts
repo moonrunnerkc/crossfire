@@ -721,6 +721,83 @@ describe("the severity bar", () => {
   });
 });
 
+describe("resuming a partial ledger", () => {
+  test("continues at the round after the last entry", async () => {
+    const target = makeTarget();
+    const path = ledgerPath();
+    const first = await runLoop({
+      config: configFor(target, { iterationCap: 1 }),
+      ledgerPath: path,
+      detectors: stubDetectors([[CRASH]]),
+      agents: stubAgents({
+        "crash-analysis": () => analysisOf(CRASH),
+        fix: (turn) => fixReportOf(turn, [CRASH.id]),
+      }),
+    });
+    expect(first.reason).toBe("iteration-cap");
+    expect(entries(first).map((entry) => entry.round)).toEqual([1]);
+
+    const resumed = await runLoop({
+      config: configFor(target, { iterationCap: 3 }),
+      ledgerPath: path,
+      detectors: stubDetectors([[], [CRASH], []]),
+      agents: stubAgents({
+        "crash-analysis": () => analysisOf(CRASH),
+        fix: (turn) => {
+          removeMarker(target, "VULNERABLE");
+          return fixReportOf(turn, [CRASH.id]);
+        },
+      }),
+      resume: true,
+    });
+
+    expect(entries(resumed).map((entry) => entry.round)).toEqual([2]);
+    expect(verifyLedger(path)).toEqual({ ok: true, entries: 2 });
+  });
+
+  test("a ledger already at the cap has no rounds left to run", async () => {
+    const target = makeTarget();
+    const path = ledgerPath();
+    await runLoop({
+      config: configFor(target, { iterationCap: 1 }),
+      ledgerPath: path,
+      detectors: stubDetectors([[]]),
+      agents: stubAgents({}),
+    });
+
+    const resumed = await runLoop({
+      config: configFor(target, { iterationCap: 1 }),
+      ledgerPath: path,
+      detectors: stubDetectors([[]]),
+      agents: stubAgents({}),
+      resume: true,
+    });
+
+    expect(resumed.reason).toBe("iteration-cap");
+    expect(entries(resumed)).toEqual([]);
+  });
+
+  test("without resume a used ledger is refused rather than forked", async () => {
+    const target = makeTarget();
+    const path = ledgerPath();
+    await runLoop({
+      config: configFor(target, { iterationCap: 1 }),
+      ledgerPath: path,
+      detectors: stubDetectors([[]]),
+      agents: stubAgents({}),
+    });
+
+    await expect(
+      runLoop({
+        config: configFor(target, { iterationCap: 2 }),
+        ledgerPath: path,
+        detectors: stubDetectors([[]]),
+        agents: stubAgents({}),
+      }),
+    ).rejects.toThrow(/round 2/);
+  });
+});
+
 describe("what a run reports as it goes", () => {
   test("emits an event for every phase of a round, in order", async () => {
     const target = makeTarget();

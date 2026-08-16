@@ -40,6 +40,8 @@ import {
 
 export interface AgentTurn {
   subtask: SubtaskClass;
+  /** The round this turn belongs to, for transcripts and for a runner's own logs. */
+  round: number;
   /** Decided by the router before the turn is built. A runner must not re-decide it. */
   agent: AgentId;
   prompt: string;
@@ -67,6 +69,12 @@ export interface RunOptions {
   signal?: AbortSignal;
   /** Diagnostics only. A run with no listener behaves identically. */
   onEvent?: (event: RunEvent) => void;
+  /**
+   * Continue an existing ledger instead of starting one. Rounds pick up after
+   * its last entry and the cap counts every round the ledger already holds, so
+   * a resumed run cannot spend the budget twice.
+   */
+  resume?: boolean;
 }
 
 export interface RunResult {
@@ -99,6 +107,10 @@ export async function runLoop(options: RunOptions): Promise<RunResult> {
     throw new BrokerError(`the target does not build, so the run cannot start: ${firstBuild.note}`);
   }
   const ledger = new LedgerWriter(options.ledgerPath);
+  // Findings are not resumed with it: detection is deterministic, so a resumed
+  // round re-finds whatever is still there rather than trusting a stale list.
+  const firstRound =
+    options.resume === true ? (ledger.lastEntry()?.round ?? 0) + 1 : 1;
   const baseline = await runTests(config);
   const startSha = await headSha(repoPath);
 
@@ -139,7 +151,7 @@ export async function runLoop(options: RunOptions): Promise<RunResult> {
     const signal = runSignal === undefined ? timeout : AbortSignal.any([timeout, runSignal]);
 
     const startedAt = performance.now();
-    const running = agents.run({ subtask, agent, prompt, signal });
+    const running = agents.run({ subtask, agent, round: currentRound, prompt, signal });
     // A turn that fails after the deadline already ended it has nothing left to
     // report, and must not surface as an unhandled rejection.
     void running.catch(() => undefined);
@@ -316,7 +328,7 @@ export async function runLoop(options: RunOptions): Promise<RunResult> {
     return report;
   }
 
-  for (let round = 1; round <= config.loop.iterationCap; round += 1) {
+  for (let round = firstRound; round <= config.loop.iterationCap; round += 1) {
     if (runSignal?.aborted === true) {
       return finish("aborted");
     }

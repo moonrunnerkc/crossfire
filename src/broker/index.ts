@@ -18,6 +18,7 @@ export { assertGitRepo, commitRound, diffSince, headSha } from "./git.js";
 
 export { createAgentRunner } from "./agents.js";
 export { createDetectorRunner } from "./detectors.js";
+export { createDryRunAgents, createDryRunDetectors } from "./dry-run.js";
 export type { DetectorRunnerOptions } from "./detectors.js";
 
 export { TERMINATION_REASONS } from "./events.js";

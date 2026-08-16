@@ -9,6 +9,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint .",
@@ -29,5 +30,8 @@
     "typescript": "6.0.3",
     "typescript-eslint": "8.67.0",
     "vitest": "4.1.10"
+  },
+  "bin": {
+    "crossfire": "./dist/cli.js"
   }
 }

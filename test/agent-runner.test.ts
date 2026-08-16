@@ -85,6 +85,7 @@ describe("the agent runner over a live ACP handle", () => {
       const answer = await runner.run({
         subtask: "fix",
         agent: "claude",
+        round: 1,
         prompt: `text {"round": 1}`,
         signal: neverAborts(),
       });
@@ -103,6 +104,7 @@ describe("the agent runner over a live ACP handle", () => {
         runner.run({
           subtask: "crash-analysis",
           agent: "grok",
+          round: 1,
           // Streams updates the broker has no event for, so no text arrives.
           prompt: "noise",
           signal: neverAborts(),
@@ -121,6 +123,7 @@ describe("the agent runner over a live ACP handle", () => {
         runner.run({
           subtask: "candidate-confirmation",
           agent: "grok",
+          round: 1,
           prompt: "fail the model is unavailable",
           signal: neverAborts(),
         }),
@@ -142,6 +145,7 @@ describe("the agent runner over a live ACP handle", () => {
         runner.run({
           subtask: "fix",
           agent: "claude",
+          round: 1,
           prompt: "text partial answer\nhang",
           signal: controller.signal,
         }),
@@ -160,6 +164,7 @@ describe("the agent runner picking a handle", () => {
     await runner.run({
       subtask: "crash-analysis",
       agent: "grok",
+      round: 1,
       prompt: "analyze this",
       signal: neverAborts(),
     });
@@ -175,6 +180,7 @@ describe("the agent runner picking a handle", () => {
       runner.run({
         subtask: "crash-analysis",
         agent: "grok",
+        round: 1,
         prompt: "analyze this",
         signal: neverAborts(),
       }),
@@ -186,7 +192,7 @@ describe("the agent runner picking a handle", () => {
     const runner = createAgentRunner({ claude: claude.handle, grok: recordingHandle("grok", "{}").handle });
 
     for (const prompt of ["first", "second", "third"]) {
-      await runner.run({ subtask: "fix", agent: "claude", prompt, signal: neverAborts() });
+      await runner.run({ subtask: "fix", agent: "claude", round: 1, prompt, signal: neverAborts() });
     }
 
     expect(claude.sessions()).toBe(3);
