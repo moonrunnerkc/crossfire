@@ -9,7 +9,13 @@ import { loadRunConfig } from "../src/config/index.js";
 import type { Finding, LedgerEntry } from "../src/contracts/index.js";
 import type { DetectionResult } from "../src/detection/index.js";
 import type { RefuzzOutcome } from "../src/gates/index.js";
-import type { AgentRunner, AgentTurn, DetectorRunner, RunResult } from "../src/broker/index.js";
+import type {
+  AgentRunner,
+  AgentTurn,
+  DetectorRunner,
+  RunEvent,
+  RunResult,
+} from "../src/broker/index.js";
 import { BrokerError, runLoop } from "../src/broker/index.js";
 import { verifyLedger } from "../src/ledger/index.js";
 import type { SubtaskClass } from "../src/router/index.js";
@@ -712,6 +718,98 @@ describe("the severity bar", () => {
     expect(result.reason).toBe("clean");
     expect(agents.turns).toEqual([]);
     expect(entries(result)[0]?.verify_results).toEqual([]);
+  });
+});
+
+describe("what a run reports as it goes", () => {
+  test("emits an event for every phase of a round, in order", async () => {
+    const target = makeTarget();
+    const events: RunEvent[] = [];
+    const agents = stubAgents({
+      "crash-analysis": () => analysisOf(CRASH),
+      fix: (turn) => {
+        removeMarker(target, "VULNERABLE");
+        return fixReportOf(turn, [CRASH.id]);
+      },
+    });
+
+    await runLoop({
+      config: configFor(target),
+      ledgerPath: ledgerPath(),
+      detectors: stubDetectors([[CRASH]]),
+      agents,
+      onEvent: (event) => events.push(event),
+    });
+
+    expect(events.map((event) => event.type)).toEqual([
+      "run-started",
+      "round-started",
+      "detected",
+      "turn",
+      "analyzed",
+      "turn",
+      "fixed",
+      "verified",
+      "tested",
+      "refuzzed",
+      "round-committed",
+      "terminated",
+    ]);
+  });
+
+  test("the detector event carries what the detectors produced", async () => {
+    const target = makeTarget();
+    const events: RunEvent[] = [];
+    const agents = stubAgents({
+      "crash-analysis": () => analysisOf(CRASH),
+      fix: (turn) => fixReportOf(turn, [CRASH.id]),
+    });
+
+    await runLoop({
+      config: configFor(target, { iterationCap: 1 }),
+      ledgerPath: ledgerPath(),
+      detectors: stubDetectors([[CRASH]]),
+      agents,
+      onEvent: (event) => events.push(event),
+    });
+
+    const detected = events.find((event) => event.type === "detected");
+    expect(detected).toMatchObject({ round: 1 });
+    expect(detected?.type === "detected" && detected.findings.map((finding) => finding.id)).toEqual([
+      CRASH.id,
+    ]);
+    expect(detected?.type === "detected" && detected.runs[0]?.detector).toBe("fuzz");
+
+    const committed = events.find((event) => event.type === "round-committed");
+    expect(committed?.type === "round-committed" && committed.git_sha).toMatch(/^[0-9a-f]{40}$/);
+  });
+
+  test("a candidate the broker refused says so in the log", async () => {
+    const target = makeTarget();
+    const events: RunEvent[] = [];
+    const agents = stubAgents({
+      "candidate-confirmation": () =>
+        JSON.stringify({
+          status: "dismissed",
+          finding_id: CANDIDATE.id,
+          reason: "the flagged path is unreachable",
+        }),
+    });
+
+    await runLoop({
+      config: configFor(target),
+      ledgerPath: ledgerPath(),
+      detectors: stubDetectors([[CANDIDATE]]),
+      agents,
+      onEvent: (event) => events.push(event),
+    });
+
+    const verdict = events.find((event) => event.type === "candidate-verdict");
+    expect(verdict).toMatchObject({
+      finding_id: CANDIDATE.id,
+      confirmed: false,
+      reason: "the flagged path is unreachable",
+    });
   });
 });
 

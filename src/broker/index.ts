@@ -20,12 +20,14 @@ export { createAgentRunner } from "./agents.js";
 export { createDetectorRunner } from "./detectors.js";
 export type { DetectorRunnerOptions } from "./detectors.js";
 
-export { TERMINATION_REASONS, runLoop } from "./state-machine.js";
+export { TERMINATION_REASONS } from "./events.js";
+export type { RunEvent, TerminationReason } from "./events.js";
+
+export { runLoop } from "./state-machine.js";
 export type {
   AgentRunner,
   AgentTurn,
   DetectorRunner,
   RunOptions,
   RunResult,
-  TerminationReason,
 } from "./state-machine.js";

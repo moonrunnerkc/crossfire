@@ -27,6 +27,7 @@ import { LedgerWriter, hashPayload } from "../ledger/index.js";
 import type { SubtaskClass } from "../router/index.js";
 import { routeSubtask } from "../router/index.js";
 import { BrokerError } from "./errors.js";
+import type { RunEvent, TerminationReason } from "./events.js";
 import { assertGitRepo, commitRound, diffSince, headSha } from "./git.js";
 import { parseAgentJson } from "./parse.js";
 import {
@@ -36,11 +37,6 @@ import {
   buildFixPlanPrompt,
   buildFixPrompt,
 } from "./prompts.js";
-
-/** CLAUDE.md rule 3. There is no fifth reason, and none of them is a model's call. */
-export const TERMINATION_REASONS = ["clean", "iteration-cap", "test-regression", "aborted"] as const;
-
-export type TerminationReason = (typeof TERMINATION_REASONS)[number];
 
 export interface AgentTurn {
   subtask: SubtaskClass;
@@ -69,6 +65,8 @@ export interface RunOptions {
   agents: AgentRunner;
   /** Manual abort. Takes effect at the next phase boundary. */
   signal?: AbortSignal;
+  /** Diagnostics only. A run with no listener behaves identically. */
+  onEvent?: (event: RunEvent) => void;
 }
 
 export interface RunResult {
@@ -107,6 +105,22 @@ export async function runLoop(options: RunOptions): Promise<RunResult> {
   const entries: LedgerEntry[] = [];
   const analyzedCrashes = new Set<string>();
   let open: Finding[] = [];
+  // Only the turn helper needs this, and threading a round through five call
+  // sites to reach it would be worse than one variable the loop owns.
+  let currentRound = 0;
+
+  function emit(event: RunEvent): void {
+    options.onEvent?.(event);
+  }
+
+  emit({
+    type: "run-started",
+    task: config.task,
+    repo_path: repoPath,
+    iteration_cap: config.loop.iterationCap,
+    severity_bar: config.loop.severityBar,
+    baseline,
+  });
 
   function throwIfAborted(): void {
     if (runSignal?.aborted === true) {
@@ -115,6 +129,7 @@ export async function runLoop(options: RunOptions): Promise<RunResult> {
   }
 
   function finish(reason: TerminationReason): RunResult {
+    emit({ type: "terminated", reason, rounds: entries.length });
     return { reason, rounds: entries.length, entries, openFindings: open };
   }
 
@@ -123,6 +138,7 @@ export async function runLoop(options: RunOptions): Promise<RunResult> {
     const timeout = AbortSignal.timeout(config.loop.turnTimeoutMs);
     const signal = runSignal === undefined ? timeout : AbortSignal.any([timeout, runSignal]);
 
+    const startedAt = performance.now();
     const running = agents.run({ subtask, agent, prompt, signal });
     // A turn that fails after the deadline already ended it has nothing left to
     // report, and must not surface as an unhandled rejection.
@@ -144,7 +160,15 @@ export async function runLoop(options: RunOptions): Promise<RunResult> {
       );
     });
 
-    return Promise.race([running, deadline]);
+    const answer = await Promise.race([running, deadline]);
+    emit({
+      type: "turn",
+      round: currentRound,
+      subtask,
+      agent,
+      duration_ms: Math.round(performance.now() - startedAt),
+    });
+    return answer;
   }
 
   /**
@@ -168,6 +192,13 @@ export async function runLoop(options: RunOptions): Promise<RunResult> {
       );
     }
     if (verdict.status === "dismissed") {
+      emit({
+        type: "candidate-verdict",
+        round: currentRound,
+        finding_id: candidate.id,
+        confirmed: false,
+        reason: verdict.reason,
+      });
       return undefined;
     }
 
@@ -180,7 +211,15 @@ export async function runLoop(options: RunOptions): Promise<RunResult> {
     };
     // A verdict of confirmed is a claim until the repro backs it. Nothing enters
     // a fix round on a command that does not reproduce.
-    return (await reproduces(promoted)) ? promoted : undefined;
+    const holds = await reproduces(promoted);
+    emit({
+      type: "candidate-verdict",
+      round: currentRound,
+      finding_id: candidate.id,
+      confirmed: holds,
+      ...(holds ? {} : { reason: "the repro the turn proposed did not reproduce" }),
+    });
+    return holds ? promoted : undefined;
   }
 
   async function analyzeCrash(crash: Finding): Promise<Finding> {
@@ -203,7 +242,15 @@ export async function runLoop(options: RunOptions): Promise<RunResult> {
     };
 
     const proposed: Finding = { ...analyzed, repro_command: analysis.repro_command };
-    return (await reproduces(proposed)) ? proposed : analyzed;
+    const adopted = await reproduces(proposed);
+    emit({
+      type: "analyzed",
+      round: currentRound,
+      finding_id: crash.id,
+      severity: analysis.severity,
+      adopted_repro: adopted,
+    });
+    return adopted ? proposed : analyzed;
   }
 
   /**
@@ -231,6 +278,7 @@ export async function runLoop(options: RunOptions): Promise<RunResult> {
         `the fix-planning turn answered for round ${plan.round}, but round ${batch.round} is in progress`,
       );
     }
+    emit({ type: "planned", round: batch.round, summary: plan.summary });
     return plan.summary;
   }
 
@@ -273,16 +321,28 @@ export async function runLoop(options: RunOptions): Promise<RunResult> {
       return finish("aborted");
     }
     const startedAt = new Date().toISOString();
+    currentRound = round;
+    emit({ type: "round-started", round });
 
     try {
       const detection = await detectors.detect(round);
       const detectorRuns = [...detection.runs];
+      emit({
+        type: "detected",
+        round,
+        runs: detection.runs,
+        findings: detection.findings,
+        duplicates_dropped: detection.duplicatesDropped,
+      });
       throwIfAborted();
 
       // Carried findings win over a fresh copy of themselves: they hold the
       // confirmed state and the repro that were established in an earlier round.
       const detected = merge(open, detection.findings);
       const raised = config.supplemental.coldHunt ? await coldHunt(detected) : [];
+      if (raised.length > 0) {
+        emit({ type: "raised", round, findings: raised });
+      }
       throwIfAborted();
       const working = withinBar(merge(detected, raised), config.loop.severityBar);
 
@@ -315,6 +375,9 @@ export async function runLoop(options: RunOptions): Promise<RunResult> {
       throwIfAborted();
 
       const fixReport = batchFindings.length === 0 ? undefined : await fixBatch(batch);
+      if (fixReport !== undefined) {
+        emit({ type: "fixed", round, report: fixReport });
+      }
       throwIfAborted();
 
       // What the repros replay and what the cross-check fuzzes are artifacts of
@@ -322,6 +385,14 @@ export async function runLoop(options: RunOptions): Promise<RunResult> {
       // that judges it. A build that fails leaves nothing judgeable: the round's
       // findings are inconclusive rather than closed, which keeps them open.
       const build = fixReport === undefined ? undefined : await runBuild(config);
+      if (build !== undefined && build.status !== "not-configured") {
+        emit({
+          type: "built",
+          round,
+          status: build.status,
+          ...(build.note === undefined ? {} : { note: build.note }),
+        });
+      }
       const verifyResults =
         build?.status === "failed"
           ? batchFindings.map((finding) => unverifiable(finding, build.note))
@@ -329,9 +400,11 @@ export async function runLoop(options: RunOptions): Promise<RunResult> {
       const unresolved = batchFindings.filter(
         (_, index) => verifyResults[index]?.outcome !== "closed",
       );
+      emit({ type: "verified", round, results: verifyResults });
       throwIfAborted();
 
       const gate = await runTestGate(config, baseline);
+      emit({ type: "tested", round, result: gate.result, regressed: gate.regressed });
 
       // The cross-check exists to test a patched build, so it runs only when a
       // round patched something, and not when the round is already halting.
@@ -340,25 +413,31 @@ export async function runLoop(options: RunOptions): Promise<RunResult> {
         const outcome = await detectors.refuzz(unresolved.map((finding) => finding.id));
         detectorRuns.push(...outcome.runs);
         reopened = outcome.newFindings;
+        emit({ type: "refuzzed", round, runs: outcome.runs, new_findings: outcome.newFindings });
       }
 
       const gitSha = await commitRound(
         repoPath,
         `crossfire round ${round}: ${batchFindings.length} confirmed, ${batchFindings.length - unresolved.length} closed, tests ${gate.result.status}`,
       );
-      entries.push(
-        ledger.append({
-          round,
-          started_at: startedAt,
-          ended_at: new Date().toISOString(),
-          detector_runs: detectorRuns,
-          findings_hash: hashPayload(batch),
-          fixes_hash: hashPayload(fixReport ?? { round, agent: routeSubtask("fix"), fixes: [] }),
-          verify_results: verifyResults,
-          test_result: gate.result,
-          git_sha: gitSha,
-        }),
-      );
+      const entry = ledger.append({
+        round,
+        started_at: startedAt,
+        ended_at: new Date().toISOString(),
+        detector_runs: detectorRuns,
+        findings_hash: hashPayload(batch),
+        fixes_hash: hashPayload(fixReport ?? { round, agent: routeSubtask("fix"), fixes: [] }),
+        verify_results: verifyResults,
+        test_result: gate.result,
+        git_sha: gitSha,
+      });
+      entries.push(entry);
+      emit({
+        type: "round-committed",
+        round,
+        git_sha: gitSha,
+        entry_hash: entry.entry_hash,
+      });
       open = merge(unresolved, reopened);
 
       if (gate.regressed) {

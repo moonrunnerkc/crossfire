@@ -14,6 +14,7 @@ import type { PermissionPolicy } from "../policy/index.js";
 import { TransportError, normalizeSessionUpdate } from "./events.js";
 import type { HandlerHooks } from "./handlers.js";
 import { registerClientHandlers } from "./handlers.js";
+import { tapStreams } from "./tap.js";
 import type { AgentHandle, NewSessionOptions, TransportMode } from "./types.js";
 
 /** Kept so a spawn that dies on startup reports why instead of "closed". */
@@ -78,10 +79,14 @@ export class AcpAgentHandle implements AgentHandle {
       });
     });
 
-    const stream = ndJsonStream(
-      Writable.toWeb(child.stdin) as WritableStream<Uint8Array>,
-      Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
-    );
+    const onTraffic = config.hooks?.onTraffic;
+    const stdin = Writable.toWeb(child.stdin) as WritableStream<Uint8Array>;
+    const stdout = Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>;
+    const tapped =
+      onTraffic === undefined
+        ? { input: stdin, output: stdout }
+        : tapStreams(stdin, stdout, onTraffic);
+    const stream = ndJsonStream(tapped.input, tapped.output);
 
     const app = registerClientHandlers(
       client({ name: `crossfire-${config.id}` }),

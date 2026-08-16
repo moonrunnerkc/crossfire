@@ -10,6 +10,7 @@ import { RequestError, methods } from "@agentclientprotocol/sdk";
 
 import type { PermissionPolicy, PolicyDecision } from "../policy/index.js";
 import { toolAccessOf } from "./events.js";
+import type { TrafficListener } from "./tap.js";
 
 /**
  * JSON-RPC implementation-defined error code for a request the policy refused.
@@ -27,6 +28,8 @@ export interface DeniedAccess {
 export interface HandlerHooks {
   /** Called for every refusal, so tests and obs/ can see what was blocked. */
   onDenied?: (denied: DeniedAccess) => void;
+  /** Every JSON-RPC line in both directions, for the per agent transcript. */
+  onTraffic?: TrafficListener;
 }
 
 function deny(method: string, path: string, decision: PolicyDecision, hooks: HandlerHooks): never {
