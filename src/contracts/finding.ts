@@ -2,7 +2,8 @@ import { z } from "zod";
 
 import { SeveritySchema } from "./severity.js";
 
-export const FINDING_SOURCES = ["fuzzer", "sast", "sca", "secret"] as const;
+/** cold-hunt is the flag gated supplemental pass, and is never a detector. */
+export const FINDING_SOURCES = ["fuzzer", "sast", "sca", "secret", "cold-hunt"] as const;
 export const CONFIRMATION_STATES = ["confirmed", "candidate", "dismissed"] as const;
 
 export const FindingSourceSchema = z.enum(FINDING_SOURCES);

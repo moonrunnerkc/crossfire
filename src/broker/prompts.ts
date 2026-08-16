@@ -1,5 +1,6 @@
 import type { RunConfig } from "../config/index.js";
 import type { Finding, FindingsBatch } from "../contracts/index.js";
+import { COLD_HUNT_MAX_RAISES, FIX_PLAN_MAX_CHARS } from "../contracts/index.js";
 import { routeSubtask } from "../router/index.js";
 
 /**
@@ -130,10 +131,12 @@ export interface FixPromptInput {
   batch: FindingsBatch;
   /** What earlier rounds already changed. Omitted on the first round. */
   diff?: string;
+  /** The planner slot's summary, when that flag is on. Context, never instruction. */
+  plan?: string;
 }
 
 export function buildFixPrompt(input: FixPromptInput): string {
-  const { config, batch, diff } = input;
+  const { config, batch, diff, plan } = input;
   const findings = batch.findings.flatMap((finding, index) => [
     ...(index === 0 ? [] : [""]),
     `${index + 1}. ${finding.id}  ${finding.class}  severity ${finding.severity}`,
@@ -156,6 +159,9 @@ export function buildFixPrompt(input: FixPromptInput): string {
     "",
     `Findings (${batch.findings.length})`,
     ...findings,
+    ...(plan === undefined
+      ? []
+      : ["", "How these relate (summary from the analysis agent, context only):", plan]),
     "",
     "What done means",
     "Every repro command above must exit non-zero after your change, and the",
@@ -181,6 +187,107 @@ export function buildFixPrompt(input: FixPromptInput): string {
     '      "summary": "what you changed and why it closes the finding"',
     "    }",
     "  ]",
+    "}",
+  ].join("\n");
+}
+
+export interface ColdHuntPromptInput {
+  config: RunConfig;
+  /** What the detectors already hold, so the pass spends its turn elsewhere. */
+  known: readonly Finding[];
+}
+
+/**
+ * The supplemental pass, off unless a run turns it on. It is deliberately framed
+ * as raising candidates rather than finding bugs: nothing here reaches a fix
+ * round without a repro the broker runs, so this pass cannot become the thing
+ * that decides what is real.
+ */
+export function buildColdHuntPrompt(input: ColdHuntPromptInput): string {
+  const { config, known } = input;
+  const alreadyHeld =
+    known.length === 0
+      ? ["  nothing yet this round"]
+      : known.map((finding) => `  ${finding.id}  ${finding.class}  ${location(finding)}`);
+
+  return [
+    "You are reading this target for defects its detectors did not surface.",
+    "A fuzzer and static scanners have already run. This pass is supplemental:",
+    "what you raise becomes a candidate, not a finding.",
+    "",
+    runHeader(config),
+    "",
+    "Already held, so look elsewhere",
+    ...alreadyHeld,
+    "",
+    "Do this",
+    "1. Read the in scope code for defects a fuzzer would not reach and a pattern scanner would not match.",
+    "2. Prefer one raise you can argue for over a list you cannot.",
+    "3. Raise nothing you would not expect to be able to demonstrate.",
+    "",
+    "Each raise is put to you again in a separate turn, where you have to produce",
+    "a repro command that the broker runs. A raise nobody can reproduce is dropped",
+    `and never reaches a fix round. Raise at most ${COLD_HUNT_MAX_RAISES}.`,
+    "",
+    READ_EXECUTE_ACCESS,
+    "",
+    "Answer with one JSON object and nothing else:",
+    "{",
+    '  "raises": [',
+    "    {",
+    '      "class": "the bug category, for example command-injection",',
+    '      "file": "a path relative to the repository root",',
+    '      "line": 42,',
+    '      "severity": "info | low | medium | high | critical",',
+    '      "description": "the defect and how input reaches it",',
+    '      "expected_secure_behavior": "what the code should do instead"',
+    "    }",
+    "  ]",
+    "}",
+    "An empty raises array is a complete answer.",
+  ].join("\n");
+}
+
+export interface FixPlanPromptInput {
+  config: RunConfig;
+  batch: FindingsBatch;
+}
+
+/**
+ * The planner slot, off unless a run turns it on. It writes one paragraph of a
+ * fix prompt. It is not asked what to fix first, what to skip, or whether the
+ * run should continue, because those are the broker's and asking would make them
+ * negotiable.
+ */
+export function buildFixPlanPrompt(input: FixPlanPromptInput): string {
+  const { config, batch } = input;
+  const findings = batch.findings.map(
+    (finding) =>
+      `  ${finding.id}  ${finding.class}  severity ${finding.severity}  at ${location(finding)}: ${finding.description}`,
+  );
+
+  return [
+    "You are writing one paragraph for another agent, which is about to fix the",
+    "findings below. Every one of them is confirmed and every one of them is being",
+    "fixed in this round.",
+    "",
+    runHeader(config),
+    `Round: ${batch.round}`,
+    "",
+    `Findings (${batch.findings.length})`,
+    ...findings,
+    "",
+    "Write a summary of how these findings relate to each other: shared root",
+    "causes, a single change that would close several, and anything about the code",
+    "that makes one of them subtler than it looks.",
+    "",
+    `Keep it under ${FIX_PLAN_MAX_CHARS} characters. Do not restate the list, do not`,
+    "rank the work, and do not name a next step.",
+    "",
+    "Answer with one JSON object and nothing else:",
+    "{",
+    `  "round": ${batch.round},`,
+    '  "summary": "the paragraph"',
     "}",
   ].join("\n");
 }

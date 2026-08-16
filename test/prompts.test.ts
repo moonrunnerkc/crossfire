@@ -6,7 +6,9 @@ import { loadRunConfig } from "../src/config/index.js";
 import type { Finding, FindingsBatch } from "../src/contracts/index.js";
 import {
   buildCandidateConfirmationPrompt,
+  buildColdHuntPrompt,
   buildCrashAnalysisPrompt,
+  buildFixPlanPrompt,
   buildFixPrompt,
 } from "../src/broker/index.js";
 
@@ -140,6 +142,69 @@ describe("fix prompt", () => {
 
   test("omits the diff section entirely when there is nothing changed yet", () => {
     expect(buildFixPrompt({ config: config(), batch: BATCH })).not.toContain("git diff");
+  });
+});
+
+describe("cold hunt prompt", () => {
+  test("renders a stable prompt from the run's scope", () => {
+    expect(buildColdHuntPrompt({ config: config(), known: [CRASH, CANDIDATE] })).toMatchSnapshot();
+  });
+
+  test("says what the detectors already have, so the pass looks elsewhere", () => {
+    const prompt = buildColdHuntPrompt({ config: config(), known: [CRASH, CANDIDATE] });
+
+    expect(prompt).toContain(CRASH.id);
+    expect(prompt).toContain(CANDIDATE.id);
+  });
+
+  test("promises nothing about what a raise becomes", () => {
+    const prompt = buildColdHuntPrompt({ config: config(), known: [] });
+
+    // A raise is a candidate. The broker confirms it the same way it confirms a
+    // scanner's, and the prompt says so rather than implying a shortcut.
+    expect(prompt).toContain("candidate");
+    expect(prompt).toContain("repro");
+    expect(prompt).toContain("Answer with one JSON object and nothing else");
+  });
+});
+
+describe("fix planning prompt", () => {
+  test("renders a stable prompt from a confirmed batch", () => {
+    expect(buildFixPlanPrompt({ config: config(), batch: BATCH })).toMatchSnapshot();
+  });
+
+  test("asks for a summary and nothing that decides anything", () => {
+    const prompt = buildFixPlanPrompt({ config: config(), batch: BATCH });
+
+    expect(prompt).toContain("summary");
+    expect(prompt.toLowerCase()).not.toContain("which finding to fix first");
+    expect(prompt.toLowerCase()).not.toContain("should the run");
+  });
+});
+
+describe("the fix prompt carrying a plan", () => {
+  test("renders a stable prompt with the planner's summary in it", () => {
+    expect(
+      buildFixPrompt({ config: config(), batch: BATCH, plan: "Both findings are the same copy." }),
+    ).toMatchSnapshot();
+  });
+
+  test("keeps the findings and the constraints when a plan is present", () => {
+    const prompt = buildFixPrompt({
+      config: config(),
+      batch: BATCH,
+      plan: "Both findings are the same copy.",
+    });
+
+    for (const finding of BATCH.findings) {
+      expect(prompt).toContain(finding.repro_command);
+    }
+    expect(prompt).toContain("Change only files under the in scope directories");
+    expect(prompt).toContain("Both findings are the same copy.");
+  });
+
+  test("omits the plan section entirely when the planner is off", () => {
+    expect(buildFixPrompt({ config: config(), batch: BATCH })).not.toContain("summary from");
   });
 });
 

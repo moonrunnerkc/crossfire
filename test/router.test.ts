@@ -15,6 +15,13 @@ describe("capability routing", () => {
     expect(routeSubtask("exploitability-assessment")).toBe("grok");
   });
 
+  test("the flag gated supplemental classes go to Grok", () => {
+    // Both are off by default. Neither can reach a fix round without the same
+    // mechanical confirmation every other candidate needs.
+    expect(routeSubtask("cold-hunt")).toBe("grok");
+    expect(routeSubtask("fix-planning")).toBe("grok");
+  });
+
   test("the code writing classes go to Claude", () => {
     expect(routeSubtask("fix")).toBe("claude");
     expect(routeSubtask("refactor")).toBe("claude");
@@ -31,7 +38,7 @@ describe("capability routing", () => {
   test("the table holds nothing else", () => {
     // A class added to the table without a test here would slip through the
     // coverage above, which iterates the table rather than the expectation.
-    expect(SUBTASK_CLASSES).toHaveLength(7);
+    expect(SUBTASK_CLASSES).toHaveLength(9);
   });
 
   test("detection is not a routable class", () => {

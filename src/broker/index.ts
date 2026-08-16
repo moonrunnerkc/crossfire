@@ -1,9 +1,16 @@
 export {
   buildCandidateConfirmationPrompt,
+  buildColdHuntPrompt,
   buildCrashAnalysisPrompt,
+  buildFixPlanPrompt,
   buildFixPrompt,
 } from "./prompts.js";
-export type { FindingPromptInput, FixPromptInput } from "./prompts.js";
+export type {
+  ColdHuntPromptInput,
+  FindingPromptInput,
+  FixPlanPromptInput,
+  FixPromptInput,
+} from "./prompts.js";
 
 export { BrokerError } from "./errors.js";
 export { parseAgentJson } from "./parse.js";

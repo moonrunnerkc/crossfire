@@ -15,8 +15,22 @@ export type { ConfirmationState, Finding, FindingSource, FindingsBatch } from ".
 export { AGENT_IDS, AgentIdSchema, FixReportSchema, FixSchema } from "./fix-report.js";
 export type { AgentId, Fix, FixReport } from "./fix-report.js";
 
-export { CandidateVerdictSchema, CrashAnalysisSchema } from "./analysis.js";
-export type { CandidateVerdict, CrashAnalysis } from "./analysis.js";
+export {
+  COLD_HUNT_MAX_RAISES,
+  CandidateVerdictSchema,
+  ColdHuntRaiseSchema,
+  ColdHuntRaisesSchema,
+  CrashAnalysisSchema,
+  FIX_PLAN_MAX_CHARS,
+  FixPlanSchema,
+} from "./analysis.js";
+export type {
+  CandidateVerdict,
+  ColdHuntRaise,
+  ColdHuntRaises,
+  CrashAnalysis,
+  FixPlan,
+} from "./analysis.js";
 
 export { AgentEventSchema, STOP_REASONS, StopReasonSchema } from "./agent-event.js";
 export type { AgentEvent, StopReason } from "./agent-event.js";

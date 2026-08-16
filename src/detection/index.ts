@@ -5,6 +5,7 @@ export {
   dedupeFindings,
   findingId,
   fuzzFindingId,
+  huntFindingId,
   sastFindingId,
   scaFindingId,
   toSlug,

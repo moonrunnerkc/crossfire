@@ -50,6 +50,48 @@ To dismiss:
 }"
 `;
 
+exports[`cold hunt prompt > renders a stable prompt from the run's scope 1`] = `
+"You are reading this target for defects its detectors did not surface.
+A fuzzer and static scanners have already run. This pass is supplemental:
+what you raise becomes a candidate, not a finding.
+
+Run: Find and close memory safety bugs in the target's request parsing path
+In scope directories: src
+Working directory: the target repository root. Every path below is relative to it.
+
+Already held, so look elsewhere
+  fuzz-4b21c9de7a10  heap-buffer-overflow  src/parse_request.c:32
+  sast-90ab12cd34ef  insecure-strcpy  src/parse_request.c:28
+
+Do this
+1. Read the in scope code for defects a fuzzer would not reach and a pattern scanner would not match.
+2. Prefer one raise you can argue for over a list you cannot.
+3. Raise nothing you would not expect to be able to demonstrate.
+
+Each raise is put to you again in a separate turn, where you have to produce
+a repro command that the broker runs. A raise nobody can reproduce is dropped
+and never reaches a fix round. Raise at most 10.
+
+You have read and execute access to the repository. You cannot write source;
+a separate agent applies fixes. Paths outside the in scope directories are
+refused by the broker rather than by you.
+
+Answer with one JSON object and nothing else:
+{
+  "raises": [
+    {
+      "class": "the bug category, for example command-injection",
+      "file": "a path relative to the repository root",
+      "line": 42,
+      "severity": "info | low | medium | high | critical",
+      "description": "the defect and how input reaches it",
+      "expected_secure_behavior": "what the code should do instead"
+    }
+  ]
+}
+An empty raises array is a complete answer."
+`;
+
 exports[`crash analysis prompt > renders a stable prompt from one confirmed crash 1`] = `
 "You are analyzing one confirmed crash in the target repository.
 A fuzzer already reproduced it from the recorded input, so whether it is real is settled.
@@ -89,6 +131,34 @@ Answer with one JSON object and nothing else:
   "severity": "info | low | medium | high | critical",
   "repro_command": "a shell command following the convention above",
   "expected_secure_behavior": "what the code should do with this input instead"
+}"
+`;
+
+exports[`fix planning prompt > renders a stable prompt from a confirmed batch 1`] = `
+"You are writing one paragraph for another agent, which is about to fix the
+findings below. Every one of them is confirmed and every one of them is being
+fixed in this round.
+
+Run: Find and close memory safety bugs in the target's request parsing path
+In scope directories: src
+Working directory: the target repository root. Every path below is relative to it.
+Round: 2
+
+Findings (2)
+  fuzz-4b21c9de7a10  heap-buffer-overflow  severity high  at src/parse_request.c:32: heap-buffer-overflow reproduced by the parse-request harness. Crash stack: parse_request (parse_request.c:32) <- LLVMFuzzerTestOneInput (parse_request_harness.c:19).
+  sast-90ab12cd34ef  insecure-strcpy  severity medium  at src/parse_request.c:28: strcpy writes an unbounded request path into a 32 byte buffer
+
+Write a summary of how these findings relate to each other: shared root
+causes, a single change that would close several, and anything about the code
+that makes one of them subtler than it looks.
+
+Keep it under 1200 characters. Do not restate the list, do not
+rank the work, and do not name a next step.
+
+Answer with one JSON object and nothing else:
+{
+  "round": 2,
+  "summary": "the paragraph"
 }"
 `;
 
@@ -187,6 +257,59 @@ index 1111111..2222222 100644
 -  strcpy(out->path, path);
 +  memcpy(out->path, path, path_len + 1);
 
+
+Answer with one JSON object and nothing else:
+{
+  "round": 2,
+  "agent": "claude",
+  "fixes": [
+    {
+      "finding_id": "the id of the finding this fix closes",
+      "files_changed": ["paths you edited"],
+      "summary": "what you changed and why it closes the finding"
+    }
+  ]
+}"
+`;
+
+exports[`the fix prompt carrying a plan > renders a stable prompt with the planner's summary in it 1`] = `
+"You are fixing confirmed findings in the target repository.
+Each one below was reproduced mechanically: its repro command exits 0 today
+because the defect is present.
+
+Run: Find and close memory safety bugs in the target's request parsing path
+In scope directories: src
+Working directory: the target repository root. Every path below is relative to it.
+Round: 2
+
+Findings (2)
+1. fuzz-4b21c9de7a10  heap-buffer-overflow  severity high
+   location: src/parse_request.c:32
+   what it is: heap-buffer-overflow reproduced by the parse-request harness. Crash stack: parse_request (parse_request.c:32) <- LLVMFuzzerTestOneInput (parse_request_harness.c:19).
+   repro: ! './build/parse-request-fuzzer' -timeout=25 '.crossfire/crashes/parse-request/fuzz-4b21c9de7a10.min'
+   expected secure behavior: the parse-request harness returns normally for the recorded input instead of aborting with heap-buffer-overflow.
+   crash artifact: .crossfire/crashes/parse-request/fuzz-4b21c9de7a10.min
+
+2. sast-90ab12cd34ef  insecure-strcpy  severity medium
+   location: src/parse_request.c:28
+   what it is: strcpy writes an unbounded request path into a 32 byte buffer
+   repro: false
+   expected secure behavior: the copy is bounded by the size of the destination buffer
+
+How these relate (summary from the analysis agent, context only):
+Both findings are the same copy.
+
+What done means
+Every repro command above must exit non-zero after your change, and the
+target's own test suite must still pass: ./test.sh
+The broker re-runs each repro and that suite itself, so a fix that does not
+flip its repro does not count, however well it reads.
+
+Constraints
+- Change only files under the in scope directories.
+- Do not weaken or delete a repro, a test, or a harness to make a check pass.
+- Fix the defect the finding describes, not the symptom its repro happens to trip.
+- Leave findings that are not listed above alone.
 
 Answer with one JSON object and nothing else:
 {

@@ -10,6 +10,8 @@ export const SUBTASK_CLASSES = [
   "candidate-confirmation",
   "repro-authoring",
   "exploitability-assessment",
+  "cold-hunt",
+  "fix-planning",
   "fix",
   "refactor",
   "test-repair",
@@ -30,6 +32,10 @@ export const ROUTING_TABLE: Readonly<Record<SubtaskClass, AgentId>> = {
   "candidate-confirmation": "grok",
   "repro-authoring": "grok",
   "exploitability-assessment": "grok",
+  // Both are off by default. A cold-hunt raise is a candidate like any other and
+  // buys its way in with a repro; the planner only writes prose for a prompt.
+  "cold-hunt": "grok",
+  "fix-planning": "grok",
   fix: "claude",
   refactor: "claude",
   "test-repair": "claude",

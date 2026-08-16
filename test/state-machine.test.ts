@@ -114,6 +114,16 @@ function configFor(
   };
 }
 
+function coldHuntConfig(repoPath: string, loop: Partial<RunConfig["loop"]> = {}): RunConfig {
+  const base = configFor(repoPath, loop);
+  return { ...base, supplemental: { ...base.supplemental, coldHunt: true } };
+}
+
+function plannerConfig(repoPath: string, loop: Partial<RunConfig["loop"]> = {}): RunConfig {
+  const base = configFor(repoPath, loop);
+  return { ...base, supplemental: { ...base.supplemental, planner: true } };
+}
+
 function detection(findings: Finding[]): DetectionResult {
   return {
     runs: [
@@ -702,6 +712,249 @@ describe("the severity bar", () => {
     expect(result.reason).toBe("clean");
     expect(agents.turns).toEqual([]);
     expect(entries(result)[0]?.verify_results).toEqual([]);
+  });
+});
+
+describe("the cold hunt pass", () => {
+  const RAISE = {
+    class: "command-injection",
+    file: "src/app.js",
+    line: 2,
+    severity: "high",
+    description: "the request path reaches a shell without quoting",
+    expected_secure_behavior: "the path is never interpolated into a shell command",
+  };
+
+  function raises(...found: unknown[]): string {
+    return JSON.stringify({ raises: found });
+  }
+
+  test("does not run at all with the flag off", async () => {
+    const target = makeTarget();
+    const agents = stubAgents({});
+
+    const result = await runLoop({
+      config: configFor(target),
+      ledgerPath: ledgerPath(),
+      detectors: stubDetectors([[]]),
+      agents,
+    });
+
+    expect(result.reason).toBe("clean");
+    expect(agents.turns).toEqual([]);
+  });
+
+  test("a raise is a candidate that still has to buy its way in with a repro", async () => {
+    const target = makeTarget();
+    const agents = stubAgents({
+      "cold-hunt": () => raises(RAISE),
+      "candidate-confirmation": (turn) =>
+        JSON.stringify({
+          status: "confirmed",
+          finding_id: /(hunt-[0-9a-f]{12})/.exec(turn.prompt)![1],
+          severity: "high",
+          repro_command: "grep -q VULNERABLE src/app.js",
+          expected_secure_behavior: "the path is never interpolated into a shell command",
+        }),
+      fix: (turn) => {
+        removeMarker(target, "VULNERABLE");
+        return fixReportOf(turn, [/(hunt-[0-9a-f]{12})/.exec(turn.prompt)![1]!]);
+      },
+    });
+
+    const result = await runLoop({
+      config: coldHuntConfig(target),
+      ledgerPath: ledgerPath(),
+      // The detectors find nothing. Everything in this round came from the hunt.
+      detectors: stubDetectors([[]]),
+      agents,
+    });
+
+    expect(agents.turns.map((turn) => `${turn.subtask}:${turn.agent}`)).toEqual([
+      "cold-hunt:grok",
+      "candidate-confirmation:grok",
+      "fix:claude",
+    ]);
+    expect(result.entries[0]?.verify_results[0]).toMatchObject({
+      outcome: "closed",
+    });
+    expect(result.entries[0]?.verify_results[0]?.finding_id).toMatch(/^hunt-/);
+  });
+
+  test("a raise nobody can reproduce never reaches a fix round", async () => {
+    const target = makeTarget();
+    const agents = stubAgents({
+      "cold-hunt": () => raises(RAISE),
+      "candidate-confirmation": (turn) =>
+        JSON.stringify({
+          status: "confirmed",
+          finding_id: /(hunt-[0-9a-f]{12})/.exec(turn.prompt)![1],
+          severity: "high",
+          repro_command: "grep -q NOT_IN_THIS_FILE src/app.js",
+          expected_secure_behavior: "the path is never interpolated into a shell command",
+        }),
+    });
+
+    const result = await runLoop({
+      config: coldHuntConfig(target),
+      ledgerPath: ledgerPath(),
+      detectors: stubDetectors([[]]),
+      agents,
+    });
+
+    expect(agents.turns.filter((turn) => turn.subtask === "fix")).toHaveLength(0);
+    expect(result.reason).toBe("clean");
+    expect(result.entries[0]?.verify_results).toEqual([]);
+  });
+
+  test("the same raise in a later round is not hunted twice into the same round", async () => {
+    const target = makeTarget();
+    const agents = stubAgents({
+      "cold-hunt": () => raises(RAISE),
+      "candidate-confirmation": (turn) =>
+        JSON.stringify({
+          status: "confirmed",
+          finding_id: /(hunt-[0-9a-f]{12})/.exec(turn.prompt)![1],
+          severity: "high",
+          repro_command: "grep -q VULNERABLE src/app.js",
+          expected_secure_behavior: "the path is never interpolated into a shell command",
+        }),
+      // Claims the fix without making it, so the finding survives into round 2.
+      fix: (turn) => fixReportOf(turn, [/(hunt-[0-9a-f]{12})/.exec(turn.prompt)![1]!]),
+    });
+
+    const result = await runLoop({
+      config: coldHuntConfig(target, { iterationCap: 2 }),
+      ledgerPath: ledgerPath(),
+      detectors: stubDetectors([[], []]),
+      agents,
+    });
+
+    expect(result.reason).toBe("iteration-cap");
+    // One finding across both rounds: the second hunt re-raises what is already
+    // open and it collapses onto the same id rather than doubling.
+    expect(result.openFindings).toHaveLength(1);
+    expect(result.entries[1]?.verify_results).toHaveLength(1);
+  });
+
+  test("malformed raises halt the run like any other agent output", async () => {
+    const target = makeTarget();
+    const agents = stubAgents({
+      "cold-hunt": () => JSON.stringify({ raises: [{ class: "", file: "src/app.js" }] }),
+    });
+
+    await expect(
+      runLoop({
+        config: coldHuntConfig(target),
+        ledgerPath: ledgerPath(),
+        detectors: stubDetectors([[]]),
+        agents,
+      }),
+    ).rejects.toThrow(/cold-hunt/);
+  });
+});
+
+describe("the planner slot", () => {
+  test("does not run at all with the flag off", async () => {
+    const target = makeTarget();
+    const agents = stubAgents({
+      "crash-analysis": () => analysisOf(CRASH),
+      fix: (turn) => {
+        removeMarker(target, "VULNERABLE");
+        return fixReportOf(turn, [CRASH.id]);
+      },
+    });
+
+    await runLoop({
+      config: configFor(target),
+      ledgerPath: ledgerPath(),
+      detectors: stubDetectors([[CRASH]]),
+      agents,
+    });
+
+    expect(agents.turns.filter((turn) => turn.subtask === "fix-planning")).toHaveLength(0);
+  });
+
+  test("its summary reaches the fix prompt and nothing else", async () => {
+    const target = makeTarget();
+    const plainRun = await (async () => {
+      const plain = makeTarget();
+      const agents = stubAgents({
+        "crash-analysis": () => analysisOf(CRASH),
+        fix: (turn) => {
+          removeMarker(plain, "VULNERABLE");
+          return fixReportOf(turn, [CRASH.id]);
+        },
+      });
+      return runLoop({
+        config: configFor(plain),
+        ledgerPath: ledgerPath(),
+        detectors: stubDetectors([[CRASH]]),
+        agents,
+      });
+    })();
+
+    const agents = stubAgents({
+      "crash-analysis": () => analysisOf(CRASH),
+      "fix-planning": () =>
+        JSON.stringify({ round: 1, summary: "One unbounded copy reached from the request line." }),
+      fix: (turn) => {
+        removeMarker(target, "VULNERABLE");
+        return fixReportOf(turn, [CRASH.id]);
+      },
+    });
+
+    const planned = await runLoop({
+      config: plannerConfig(target),
+      ledgerPath: ledgerPath(),
+      detectors: stubDetectors([[CRASH]]),
+      agents,
+    });
+
+    // Control flow is untouched: same termination, same rounds, same verdicts.
+    expect(planned.reason).toBe(plainRun.reason);
+    expect(planned.rounds).toBe(plainRun.rounds);
+    expect(planned.entries[0]?.verify_results).toEqual(plainRun.entries[0]?.verify_results);
+
+    const fixTurn = agents.turns.find((turn) => turn.subtask === "fix");
+    expect(fixTurn?.prompt).toContain("One unbounded copy reached from the request line.");
+    expect(agents.turns.map((turn) => turn.subtask)).toEqual([
+      "crash-analysis",
+      "fix-planning",
+      "fix",
+    ]);
+  });
+
+  test("a summary that misses the schema halts rather than reaching the prompt", async () => {
+    const target = makeTarget();
+    const agents = stubAgents({
+      "crash-analysis": () => analysisOf(CRASH),
+      "fix-planning": () => JSON.stringify({ round: 1, summary: "" }),
+      fix: (turn) => fixReportOf(turn, [CRASH.id]),
+    });
+
+    await expect(
+      runLoop({
+        config: plannerConfig(target),
+        ledgerPath: ledgerPath(),
+        detectors: stubDetectors([[CRASH]]),
+        agents,
+      }),
+    ).rejects.toThrow(/fix-planning/);
+  });
+
+  test("the planner never runs for a round with nothing to fix", async () => {
+    const target = makeTarget();
+    const agents = stubAgents({});
+
+    await runLoop({
+      config: plannerConfig(target),
+      ledgerPath: ledgerPath(),
+      detectors: stubDetectors([[]]),
+      agents,
+    });
+
+    expect(agents.turns).toEqual([]);
   });
 });
 

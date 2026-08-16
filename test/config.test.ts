@@ -117,6 +117,22 @@ describe("loadRunConfig", () => {
     expect(() => loadRunConfig(writeConfig(raw))).toThrow(/target\.testCommand/);
   });
 
+  test("leaves both supplemental passes off when the config says nothing", () => {
+    const config = loadRunConfig(writeConfig(minimalConfig()));
+
+    expect(config.supplemental).toEqual({ coldHunt: false, planner: false });
+  });
+
+  test("turns a supplemental pass on only when it is asked for", () => {
+    const raw = minimalConfig();
+    raw.supplemental = { coldHunt: true };
+
+    expect(loadRunConfig(writeConfig(raw)).supplemental).toEqual({
+      coldHunt: true,
+      planner: false,
+    });
+  });
+
   test("carries an optional build command, for targets that compile", () => {
     const raw = minimalConfig();
     (raw.target as Record<string, unknown>).buildCommand = "./build.sh";

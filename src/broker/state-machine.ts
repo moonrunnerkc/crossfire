@@ -8,13 +8,19 @@ import type {
   Severity,
   VerifyResult,
 } from "../contracts/index.js";
+import type { ColdHuntRaise } from "../contracts/index.js";
 import {
   CandidateVerdictSchema,
+  ColdHuntRaisesSchema,
   CrashAnalysisSchema,
+  FindingSchema,
+  FixPlanSchema,
   FixReportSchema,
+  formatIssues,
   meetsSeverityBar,
 } from "../contracts/index.js";
 import type { DetectionResult } from "../detection/index.js";
+import { huntFindingId } from "../detection/index.js";
 import type { RefuzzOutcome } from "../gates/index.js";
 import { runBuild, runTestGate, runTests, verifyFindings } from "../gates/index.js";
 import { LedgerWriter, hashPayload } from "../ledger/index.js";
@@ -25,7 +31,9 @@ import { assertGitRepo, commitRound, diffSince, headSha } from "./git.js";
 import { parseAgentJson } from "./parse.js";
 import {
   buildCandidateConfirmationPrompt,
+  buildColdHuntPrompt,
   buildCrashAnalysisPrompt,
+  buildFixPlanPrompt,
   buildFixPrompt,
 } from "./prompts.js";
 
@@ -198,11 +206,45 @@ export async function runLoop(options: RunOptions): Promise<RunResult> {
     return (await reproduces(proposed)) ? proposed : analyzed;
   }
 
+  /**
+   * The supplemental pass, off unless the config turns it on. What it returns is
+   * a list of candidates, which is the whole safeguard: a raise goes through the
+   * same confirmation as a scanner's, so this pass can add work to a round but
+   * can never be the thing that decides a bug is real.
+   */
+  async function coldHunt(known: readonly Finding[]): Promise<Finding[]> {
+    const text = await turn("cold-hunt", buildColdHuntPrompt({ config, known }));
+    const { raises } = parseAgentJson(ColdHuntRaisesSchema, text, "cold-hunt");
+    return raises.map((raise) => raisedCandidate(raise));
+  }
+
+  /**
+   * The planner slot, off unless the config turns it on. Its output reaches one
+   * section of the fix prompt and nothing else: no routing, no ordering, no say
+   * in whether the round or the run continues.
+   */
+  async function planFix(batch: FindingsBatch): Promise<string> {
+    const text = await turn("fix-planning", buildFixPlanPrompt({ config, batch }));
+    const plan = parseAgentJson(FixPlanSchema, text, "fix-planning");
+    if (plan.round !== batch.round) {
+      throw new BrokerError(
+        `the fix-planning turn answered for round ${plan.round}, but round ${batch.round} is in progress`,
+      );
+    }
+    return plan.summary;
+  }
+
   async function fixBatch(batch: FindingsBatch): Promise<FixReport> {
     const diff = await diffSince(repoPath, startSha);
+    const plan = config.supplemental.planner ? await planFix(batch) : undefined;
     const text = await turn(
       "fix",
-      buildFixPrompt({ config, batch, ...(diff === "" ? {} : { diff }) }),
+      buildFixPrompt({
+        config,
+        batch,
+        ...(diff === "" ? {} : { diff }),
+        ...(plan === undefined ? {} : { plan }),
+      }),
     );
     const report = parseAgentJson(FixReportSchema, text, "fix");
 
@@ -239,7 +281,10 @@ export async function runLoop(options: RunOptions): Promise<RunResult> {
 
       // Carried findings win over a fresh copy of themselves: they hold the
       // confirmed state and the repro that were established in an earlier round.
-      const working = withinBar(merge(open, detection.findings), config.loop.severityBar);
+      const detected = merge(open, detection.findings);
+      const raised = config.supplemental.coldHunt ? await coldHunt(detected) : [];
+      throwIfAborted();
+      const working = withinBar(merge(detected, raised), config.loop.severityBar);
 
       const confirmed: Finding[] = [];
       for (const finding of working) {
@@ -331,6 +376,37 @@ export async function runLoop(options: RunOptions): Promise<RunResult> {
   }
 
   return finish("iteration-cap");
+}
+
+/**
+ * Turns one raise into a candidate the loop can carry. The broker assigns the
+ * id, so a hunt cannot name its own finding, and the result is put through the
+ * finding schema, so a raise that points outside the repo is rejected here
+ * rather than reaching a repro run.
+ */
+function raisedCandidate(raise: ColdHuntRaise): Finding {
+  const candidate = {
+    id: huntFindingId(raise.class, raise.file, raise.line),
+    source: "cold-hunt",
+    confirmation_state: "candidate",
+    severity: raise.severity,
+    class: raise.class,
+    file: raise.file,
+    ...(raise.line === undefined ? {} : { line: raise.line }),
+    description: raise.description,
+    // A raise arrives with no repro, and false reproduces nothing, which is the
+    // honest placeholder until confirmation replaces it with a working command.
+    repro_command: "false",
+    expected_secure_behavior: raise.expected_secure_behavior,
+  };
+
+  const result = FindingSchema.safeParse(candidate);
+  if (!result.success) {
+    throw new BrokerError(
+      `the cold-hunt turn raised something that is not a finding:\n${formatIssues(result.error.issues)}`,
+    );
+  }
+  return result.data;
 }
 
 function unverifiable(finding: Finding, note: string | undefined): VerifyResult {

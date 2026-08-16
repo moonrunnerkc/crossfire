@@ -11,6 +11,10 @@
     "severityBar": "medium",
     "turnTimeoutMs": 300000
   },
+  "supplemental": {
+    "coldHunt": false,
+    "planner": false
+  },
   "detectors": {
     "semgrep": {
       "enabled": true,

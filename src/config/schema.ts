@@ -130,10 +130,24 @@ const LoopSchema = z
   })
   .default(() => ({ ...LOOP_DEFAULTS }));
 
+/**
+ * Supplemental passes, both off unless a run asks for them. Neither can become
+ * the primary detector or touch termination: a cold-hunt raise is a candidate
+ * that still needs a repro the broker runs, and the planner only writes the
+ * summary paragraph of a fix prompt.
+ */
+const SupplementalSchema = z
+  .strictObject({
+    coldHunt: z.boolean().default(false),
+    planner: z.boolean().default(false),
+  })
+  .default(() => ({ coldHunt: false, planner: false }));
+
 export const RunConfigSchema = z.strictObject({
   task: z.string().min(1, "task must describe what this run is for"),
   target: TargetSchema,
   loop: LoopSchema,
+  supplemental: SupplementalSchema,
   detectors: z.strictObject({
     semgrep: SemgrepConfigSchema,
     osvScanner: OsvScannerConfigSchema,
