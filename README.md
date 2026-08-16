@@ -1,178 +1,108 @@
 # crossfire
 
-A deterministic broker that drives two ACP coding agents through a
-detect, analyze, fix, verify loop against a target repository.
+crossfire points two ACP coding agents at a target repository and keeps every decision in code: deterministic detectors find the bugs, Grok reasons over them, Claude patches, and no fix counts until the broker re-runs the repro itself and watches the exit code flip.
 
-Deterministic detectors find the bugs. A fuzzer produces crashes and static
-scanners produce candidates. Grok reasons over what they found and proves a
-candidate by building a repro. Claude patches. The broker verifies every fix by
-re-running the repro itself and records the round as a hash-chained ledger entry
-and a git commit.
+![version](https://img.shields.io/badge/version-0.1.0-blue?style=flat-square)
+![node](https://img.shields.io/badge/node-%3E%3D20-5fa04e?style=flat-square)
+![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178c6?style=flat-square)
+![tests](https://img.shields.io/badge/tests-vitest-fcc72b?style=flat-square)
 
-The broker owns all control flow. Models answer questions inside a round; they
-never decide routing, what happens next, or when to stop.
+[Requirements](#requirements) | [Quick start](#quick-start) | [Usage](#usage) | [What it does](#what-it-does) | [Architecture](#architecture) | [Docs](docs/README.md)
 
 ## Requirements
 
-- Node 20 or newer.
-- `git`, and a target that is its own git repository.
-- For the detectors: [semgrep](https://semgrep.dev), [osv-scanner](https://github.com/google/osv-scanner),
-  and a fuzz harness with an engine crossfire has an adapter for (libFuzzer today).
-- For the agents: the `claude` and `grok` CLIs, logged in.
+- Node 20 or newer, and `git`.
+- A target that is its own git repository, since every round commits into it.
+- For the detectors: [semgrep](https://semgrep.dev), [osv-scanner](https://github.com/google/osv-scanner), and a fuzz harness built for libFuzzer.
+- For the agents: the `claude` and `grok` CLIs, installed and logged in.
 
-None of these are needed for `--dry-run`.
+Only Node and git are needed for a `--dry-run`. Platform notes and the full install path are in [docs/installation.md](docs/installation.md).
+
+## Quick start
 
 ```sh
-npm install
-npm run check      # types, lint, and the full suite
-npm run build      # dist/, including the crossfire CLI entry point
+git clone git@github.com:moonrunnerkc/crossfire.git
+cd crossfire
+npm install && npm run check
 ```
 
-## Running
+`npm run check` is types, lint, and the suite. It ends with:
+
+```text
+ Test Files  15 passed | 2 skipped (17)
+      Tests  285 passed | 3 skipped (288)
+```
+
+Then `npm run build` writes `dist/`, and the CLI runs as `node dist/cli.js`. The two skipped files are the smoke and integration runs, which need the real agents.
+
+## Usage
+
+Exercise the whole loop with no scanners, no compiler, and no models. Everything except the detectors and the agents runs for real:
+
+```sh
+node dist/cli.js run --config crossfire.json --dry-run --run-dir runs/dry
+```
+
+```text
+round 1
+  detected 1 finding(s) from semgrep:ok
+  candidate-confirmation -> grok in 0s
+  candidate dry-run-finding confirmed
+  fix -> claude in 0s
+  1 fix(es) reported
+  verify 1 closed
+  tests pass
+  re-fuzz found 0 new
+  committed 77dab6b67f
+crossfire: clean after 1 round(s)
+```
+
+A real run, against the config that describes the target, its detectors, and the iteration cap:
 
 ```sh
 node dist/cli.js run --config crossfire.json
-node dist/cli.js run --config crossfire.json --dry-run
-node dist/cli.js resume --config crossfire.json --run-dir runs/2026-08-15T10-00-00-000Z
+```
+
+Verify a finished run's hash chain and print it. Exit is non-zero if the chain is broken:
+
+```sh
 node dist/cli.js export --ledger runs/2026-08-15T10-00-00-000Z/ledger.jsonl
 ```
 
-`npm run build` first. The package declares a `crossfire` bin, so `npm link` puts
-the same entry point on your PATH as `crossfire run ...`.
+Every flag, every config field, and worked examples: [docs/usage.md](docs/usage.md).
 
-`--dry-run` stubs the detectors and the agents and nothing else. The broker, the
-gates, git, and the ledger still run for real, so it exercises the whole loop
-without scanners, a compiler, or a model. It is the fastest way to check that a
-config, a target, and its test command hang together.
+## What it does
 
-Exit codes: `0` when the run ended clean, `1` when it hit the iteration cap,
-halted on a test regression, or was aborted, and `2` for a usage or
-configuration error.
+- Runs Semgrep, OSV-Scanner, and libFuzzer against the configured scope, then collapses what they report into one deduplicated set of findings keyed on the bug rather than on the tool that saw it.
+- Sends scanner candidates to Grok, which either dismisses one or hands back a repro command. The broker runs that command before the candidate is allowed anywhere near a fix.
+- Routes fixes to Claude, the only agent with write access. Grok gets read and execute, enforced in the ACP permission and filesystem handlers rather than asked for in prompt text.
+- Judges every fix on one thing: the repro exits 0 or it does not.
+- Rebuilds between the patch and the checks, so a round never grades the previous binary.
+- Re-fuzzes the patched build for a bounded budget, which catches both a bug adjacent to the patch and a crash the fix failed to close.
+- Writes one hash-chained ledger entry and one git commit per round, empty rounds included, so a gap cannot be confused with a round somebody removed.
+- Stops for four reasons: nothing survived a full pass, the iteration cap, a test regression, or a manual abort.
 
-## Configuration
+## Architecture
 
-`crossfire.sample.json` is a working config for the fixture in
-`fixtures/vulnerable-repo`. The fields:
-
-| Field | What it does |
-| --- | --- |
-| `task` | One line describing what the run is for. It goes into every prompt. |
-| `target.repoPath` | The repository to work on, resolved relative to the config file. |
-| `target.inScopeDirs` | Directories the run is about. Detection and the fix prompt use them. |
-| `target.excludedPaths` | Globs no agent and no detector may touch. The secret defaults are always added. |
-| `target.buildCommand` | Optional. Run before the first round and after every fix. |
-| `target.testCommand` | The target's own suite. Captured as a baseline, re-run as a gate. |
-| `loop.iterationCap` | The hard maximum number of rounds. |
-| `loop.severityBar` | Findings below this are dropped at detection. |
-| `loop.turnTimeoutMs` | How long a single agent turn may take. |
-| `supplemental.coldHunt` | Off by default. See below. |
-| `supplemental.planner` | Off by default. See below. |
-| `detectors.semgrep` | Ruleset and time budget for SAST. |
-| `detectors.osvScanner` | Lockfiles and time budget for SCA. |
-| `detectors.fuzz` | Time budget and one entry per harness: id, language, engine, entry point, corpus. |
-
-A target that builds artifacts needs `buildCommand`. A crash repro replays a
-binary and the fuzzer fuzzes one, so without a rebuild between a fix and the
-checks that judge it, the round measures the previous binary: a real fix reads as
-a failure, and a fix that does not compile reads as a pass.
-
-## The repro convention
-
-A finding's repro is a shell command, run by the broker from the target's root.
-
-```
-exit 0        the bug is still present
-non-zero      the bug is gone
+```mermaid
+flowchart LR
+  D[detectors<br/>semgrep, osv-scanner, libFuzzer] --> B{broker}
+  B -->|confirm, analyze| G[Grok<br/>read + execute]
+  B -->|fix| C[Claude<br/>write]
+  G --> B
+  C --> B
+  B --> V[gates<br/>build, repro, tests, re-fuzz]
+  V --> L[(ledger + one commit per round)]
+  V --> B
 ```
 
-This is the only thing that decides whether a fix worked. Everything that cannot
-be run to completion is inconclusive rather than a pass, because a blown timeout,
-a killed process, and a missing crash artifact all produce the same non-zero exit
-a real fix does.
+The split is the point. Detection is mechanical, so a model can never be the reason a bug is considered real; the broker holds routing and termination, so a model can never talk the loop into another round or out of one. Agent calls are stateless from our side: each turn gets the current findings and the diff, never an accumulated transcript. The reasoning behind each seam is in [docs/architecture.md](docs/architecture.md).
 
-For a fuzzer finding, the repro replays the minimized crash artifact through the
-harness and normalizes its exit code. For a scanner candidate, the repro is the
-dynamic proof Grok built, and the broker runs it before the candidate is allowed
-into a fix round.
+## Docs
 
-## A round
+[Docs index](docs/README.md) covers [installation](docs/installation.md), [usage and configuration](docs/usage.md), [architecture](docs/architecture.md), and [troubleshooting](docs/troubleshooting.md). Working on crossfire itself: [CONTRIBUTING.md](CONTRIBUTING.md).
 
-1. **Detect.** Scanners and the fuzzer run against the scope. The fuzzer's
-   crashes arrive confirmed; the scanners' findings arrive as candidates.
-2. **Confirm.** Each candidate goes to Grok, which either dismisses it or returns
-   a repro. The broker runs that repro. A candidate whose repro does not
-   reproduce is dropped, whatever the verdict said.
-3. **Analyze.** Each new crash goes to Grok for a root cause, a severity, and a
-   repro. A proposed repro replaces the detector's only after the broker has run
-   it and seen it reproduce.
-4. **Fix.** The confirmed batch goes to Claude with every repro that has to be
-   made to fail, the in scope directories, and the diff of what earlier rounds
-   changed.
-5. **Verify.** The target is rebuilt, every repro is re-run, and the target's own
-   suite is compared against the baseline captured before round one. Then the
-   fuzzer runs again for a bounded budget against the patched build, and anything
-   it finds that is not already open enters the next round confirmed.
+## License
 
-The round ends with exactly one git commit in the target and exactly one
-hash-chained ledger entry, always, so a gap in either sequence cannot be
-confused with a round somebody removed.
-
-A run stops for four reasons and no others: nothing survived a full detect and
-verify pass, the iteration cap, a test regression, or a manual abort. Malformed
-agent output, a turn that overran its timeout, and a fix report signed for the
-wrong round are not termination reasons. They throw, because a run that crashed
-is not a run that finished.
-
-## Supplemental passes
-
-Both are off unless a config turns them on, and neither can change what the loop
-does.
-
-- `supplemental.coldHunt` gives Grok one turn per round to raise defects the
-  detectors missed. A raise is a candidate: it goes through the same confirmation
-  every scanner candidate gets, so it cannot reach a fix round without a repro
-  the broker ran.
-- `supplemental.planner` gives Grok one turn to summarize the confirmed batch
-  into a paragraph of the fix prompt. It is bounded by schema, and nothing but
-  the prompt builder ever reads it.
-
-## What a run leaves behind
-
-```
-runs/<timestamp>/
-  ledger.jsonl            one hash-chained entry per round
-  run.jsonl               structured events: detectors, turns, verdicts, gates
-  transcripts/claude.jsonl
-  transcripts/grok.jsonl  raw JSON-RPC both ways, plus every refusal
-```
-
-Plus one commit per round in the target repository.
-
-`crossfire export --ledger <path>` verifies the chain and prints it. A ledger
-that fails verification exports its failure and no entries, so a tampered ledger
-cannot travel as a clean one. Its exit code is non-zero when the chain is broken.
-
-## Scoping
-
-Grok has read and execute access and no write access at all. Claude is the only
-agent that writes. Neither can read or write an excluded path, and the detectors
-run under the same exclusion set. This is enforced in the ACP permission and
-filesystem handlers rather than in prompt text, because an agent cannot be argued
-out of a handler that refuses.
-
-Known limit: Claude's write scope is the repository minus the exclusion set,
-not `inScopeDirs`. The fix prompt asks it to stay inside them; that ask is not
-yet enforcement.
-
-## Tests
-
-```sh
-npm run check                                             # everything below except the guarded runs
-CROSSFIRE_SMOKE=1 npx vitest run test/smoke.test.ts        # real Claude and Grok, one trivial prompt each
-CROSSFIRE_INTEGRATION=1 npx vitest run test/integration.test.ts   # the whole loop against the fixture
-```
-
-The integration run needs every external tool and both agents, takes about seven
-minutes, and spends real tokens. It drives the seeded crash and the seeded
-scanner finding through the full loop against a temporary clone of
-`fixtures/vulnerable-repo`.
+<!-- TODO: no LICENSE file and no `license` field in package.json, which is `private: true`. Which license should ship with this repo, or is it deliberately unlicensed? -->
+Not yet declared.
