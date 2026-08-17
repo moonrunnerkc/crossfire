@@ -1,0 +1,1 @@
+{"finding_id":"fuzz-4b21c9de7a10","root_cause":"strcpy into a 32 byte path with no length check","severity":"high","repro_command":"! ./build/parse-request-fuzzer crash.min","expected_secure_behavior":"the parser rejects a path longer than the field it copies into"}

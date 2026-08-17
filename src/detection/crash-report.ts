@@ -27,6 +27,26 @@ export interface CrashReport {
 
 const SIGNATURE_FRAMES = 3;
 
+/**
+ * Assembles a report from a parsed stack, with the reporting runtime's own
+ * frames dropped so the signature is about the target. A stripped binary, or a
+ * stack that is all runtime, can leave nothing behind: signing over the raw
+ * stack still beats signing over the kind alone.
+ */
+export function crashReportOf(
+  kind: string,
+  stack: readonly CrashFrame[],
+  isRuntimeFrame: (frame: CrashFrame) => boolean,
+): CrashReport {
+  const appFrames = stack.filter((frame) => !isRuntimeFrame(frame));
+  const frames = appFrames.length > 0 ? appFrames : [...stack];
+  const signature = [
+    kind,
+    ...frames.slice(0, SIGNATURE_FRAMES).map((frame) => frame.functionName),
+  ].join("|");
+  return { kind, frames, signature };
+}
+
 const RUNTIME_MODULE = /libclang_rt|libsystem|dyld|libc\+\+abi/i;
 const RUNTIME_FUNCTION = /^(fuzzer::|__asan|__sanitizer|__lsan|__ubsan|__tsan|wrap_|main$|start$)/;
 const RUNTIME_FILE = /(^|[/\\])(Fuzzer[A-Za-z]*\.cpp|(asan|sanitizer|lsan|ubsan)_[a-z_]*\.cpp)$/;
@@ -49,23 +69,40 @@ function crashKind(stderr: string): string | undefined {
 function parseFrame(body: string): CrashFrame {
   const inModule = /^(.*?)\s+\(([^)]+)\)$/.exec(body);
   if (inModule?.[1] !== undefined && inModule[2] !== undefined) {
-    return { functionName: stripOffset(inModule[1]), module: inModule[2] };
+    return { functionName: frameName(inModule[1]), module: inModule[2] };
   }
 
   const located = /^(.*?)\s+(\S+):(\d+)(?::\d+)?$/.exec(body);
   if (located?.[1] !== undefined && located[2] !== undefined && located[3] !== undefined) {
+    const line = frameLine(located[3]);
     return {
-      functionName: stripOffset(located[1]),
+      functionName: frameName(located[1]),
       file: located[2],
-      line: Number.parseInt(located[3], 10),
+      ...(line === undefined ? {} : { line }),
     };
   }
 
-  return { functionName: stripOffset(body) };
+  return { functionName: frameName(body) };
 }
 
-function stripOffset(functionName: string): string {
-  return functionName.replace(/\+0x[0-9a-f]+$/i, "").trim();
+/**
+ * A frame's line number, or undefined when what the tool printed is not one.
+ * A Finding's line has to be a positive integer, and a symbolizer with no line
+ * information to give prints 0 rather than leaving the field out.
+ */
+export function frameLine(text: string): number | undefined {
+  const line = Number.parseInt(text, 10);
+  return Number.isSafeInteger(line) && line > 0 ? line : undefined;
+}
+
+/**
+ * The frame's name with the offset the symbolizer appended taken off. A frame
+ * in a stripped module has nothing left after that, and an unnamed frame in a
+ * signature would quietly collapse two different stacks into one, so it says
+ * what it is instead.
+ */
+function frameName(functionName: string): string {
+  return functionName.replace(/\+0x[0-9a-f]+$/i, "").trim() || "<unknown>";
 }
 
 function isRuntimeFrame(frame: CrashFrame): boolean {
@@ -114,16 +151,7 @@ export function parseCrashReport(stderr: string): CrashReport | undefined {
     return undefined;
   }
 
-  const allFrames = parseFrames(stderr);
-  const appFrames = allFrames.filter((frame) => !isRuntimeFrame(frame));
-  // A stripped or fully inlined binary can leave nothing but runtime frames.
-  // Signing over the raw stack still beats signing over the kind alone.
-  const frames = appFrames.length > 0 ? appFrames : allFrames;
-  const signature = [kind, ...frames.slice(0, SIGNATURE_FRAMES).map((f) => f.functionName)].join(
-    "|",
-  );
-
-  return { kind, frames, signature };
+  return crashReportOf(kind, parseFrames(stderr), isRuntimeFrame);
 }
 
 /**
@@ -152,7 +180,8 @@ export function resolveRepoFile(
   return matches.length === 1 ? matches[0] : undefined;
 }
 
-function toPosix(path: string): string {
+/** Repo relative paths are posix in findings, whatever the host separator is. */
+export function toPosix(path: string): string {
   return path.split("\\").join("/");
 }
 

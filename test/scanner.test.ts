@@ -138,12 +138,72 @@ describe("semgrep scanner", () => {
         ],
       },
       { enabled: true, ruleset: "p/security-audit", timeBudgetMs: 1000 },
+      FIXTURE,
     );
 
     expect(findings).toHaveLength(1);
     expect(findings[0]?.class).toBe("insecure-use-gets-fn");
     expect(findings[0]?.severity).toBe("medium");
     expect(findings[0]?.line).toBe(12);
+  });
+
+  test("a finding keeps its id when a fix above it shifts the line", () => {
+    // The defect this pins: a fix shifts every line below it, and a line keyed
+    // id turned the finding it had just closed into a brand new one.
+    const source = readFileSync(resolve(FIXTURE, "src/parse_request.c"), "utf8");
+    const flagged = "strcpy(out->path, path)";
+    const at = source.indexOf(flagged);
+    expect(at).toBeGreaterThan(-1);
+
+    const matchAt = (offset: number, line: number) =>
+      normalizeSemgrepOutput(
+        {
+          results: [
+            {
+              check_id: "c.lang.security.insecure-use-string-copy-fn",
+              path: "src/parse_request.c",
+              start: { line, offset },
+              end: { offset: offset + flagged.length },
+              extra: { severity: "WARNING" },
+            },
+          ],
+        },
+        { enabled: true, ruleset: "p/security-audit", timeBudgetMs: 1000 },
+        FIXTURE,
+      )[0];
+
+    const before = matchAt(at, 30);
+    // The same construct, reported four lines lower after an edit above it.
+    const after = matchAt(at, 34);
+
+    expect(before?.id).toBe(after?.id);
+    expect(before?.line).toBe(30);
+    expect(after?.line).toBe(34);
+  });
+
+  test("a different construct in the same file is a different finding", () => {
+    const source = readFileSync(resolve(FIXTURE, "src/parse_request.c"), "utf8");
+    const idFor = (flagged: string) => {
+      const at = source.indexOf(flagged);
+      expect(at).toBeGreaterThan(-1);
+      return normalizeSemgrepOutput(
+        {
+          results: [
+            {
+              check_id: "c.lang.security.insecure-use-string-copy-fn",
+              path: "src/parse_request.c",
+              start: { line: 1, offset: at },
+              end: { offset: at + flagged.length },
+              extra: { severity: "WARNING" },
+            },
+          ],
+        },
+        { enabled: true, ruleset: "p/security-audit", timeBudgetMs: 1000 },
+        FIXTURE,
+      )[0]?.id;
+    };
+
+    expect(idFor("strcpy(out->path, path)")).not.toBe(idFor("memcpy(out->method, line, method_len)"));
   });
 
   test("drops the line when semgrep reports no location", () => {
@@ -159,6 +219,7 @@ describe("semgrep scanner", () => {
         ],
       },
       { enabled: true, ruleset: "p/security-audit", timeBudgetMs: 1000 },
+      FIXTURE,
     );
 
     expect(findings[0]?.line).toBeUndefined();

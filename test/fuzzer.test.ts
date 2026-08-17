@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, rmSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { afterAll, describe, expect, test } from "vitest";
 
 import type { RunConfig } from "../src/config/index.js";
 import { loadRunConfig } from "../src/config/index.js";
@@ -19,21 +19,24 @@ const CLEAN_BUDGET_MS = 12_000;
 /**
  * The harness needs a clang carrying the libFuzzer runtime. Apple's does not
  * ship one, so the fuzz integration tests announce themselves as skipped rather
- * than failing on a machine that cannot build the fixture at all.
+ * than failing on a machine that cannot build the fixture at all. The build
+ * runs while the file is collected rather than in a hook, because collection is
+ * when runIf reads the result.
  */
-let buildError: string | undefined;
-
-beforeAll(() => {
+function buildFixture(): string | undefined {
   for (const mode of ["vulnerable", "fixed"]) {
     try {
-      execFileSync("./build.sh", [mode], { cwd: FIXTURE, stdio: "pipe" });
+      execFileSync("./build.sh", [mode], { cwd: FIXTURE, stdio: "pipe", timeout: BUILD_TIMEOUT_MS });
     } catch (error) {
-      buildError = `${(error as Error).message}`.split("\n")[0];
-      console.warn(`fuzz integration tests skipped, the fixture harness did not build: ${buildError}`);
-      return;
+      const reason = `${(error as Error).message}`.split("\n")[0];
+      console.warn(`fuzz integration tests skipped, the fixture harness did not build: ${reason}`);
+      return reason;
     }
   }
-}, BUILD_TIMEOUT_MS);
+  return undefined;
+}
+
+const buildError = buildFixture();
 
 afterAll(() => {
   rmSync(join(FIXTURE, ".crossfire"), { recursive: true, force: true });
@@ -125,6 +128,27 @@ describe("crash report parsing", () => {
     expect(parseCrashReport("==1==ERROR: libFuzzer: out-of-memory (malloc(4096))\n")?.kind).toBe(
       "out-of-memory",
     );
+  });
+
+  test("a frame the symbolizer could not name still carries a name", () => {
+    // Found by the crash-report fuzz harness: a frame in a stripped module is
+    // nothing but an offset, and an empty name would collapse two stacks into
+    // one signature.
+    const stripped = parseCrashReport(
+      "==1==ERROR: libFuzzer: deadly signal\n    #0 0x1041ac9bc +0x40\n    #1 0x1041acaf0 in boom src/a.c:3",
+    );
+
+    expect(stripped?.frames[0]?.functionName).toBe("<unknown>");
+  });
+
+  test("a frame with no usable line number is reported without one", () => {
+    // Also from the harness: Finding.line is a positive integer, so line 0 has
+    // to be absent rather than present and out of contract.
+    const report = parseCrashReport(
+      "==1==ERROR: libFuzzer: deadly signal\n    #0 0x1041ac9bc in boom src/a.c:0",
+    );
+
+    expect(report?.frames[0]).toEqual({ functionName: "boom", file: "src/a.c" });
   });
 
   test("output with no crash in it is not a crash report", () => {

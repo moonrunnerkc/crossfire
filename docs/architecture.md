@@ -9,7 +9,7 @@ flowchart TB
   CLI[cli.ts] --> CFG[config<br/>zod schema, loader]
   CLI --> BRK
   CFG --> BRK{broker<br/>state machine}
-  BRK --> DET[detection<br/>semgrep, osv-scanner, libFuzzer]
+  BRK --> DET[detection<br/>semgrep, osv-scanner, libFuzzer, Jazzer.js]
   BRK --> RTR[router<br/>static capability table]
   RTR --> ADP[adapters<br/>claude, grok]
   ADP --> TRN[transport<br/>ACP client over stdio]
@@ -34,7 +34,7 @@ flowchart TB
 | `ledger/` | The hash-chained writer and the chain verifier. |
 | `obs/` | The run log and the per-agent transcripts. Nothing in the loop reads them back. |
 
-The only sanctioned extension points are `FuzzEngine`, `Scanner`, and `AgentHandle`. A second fuzz engine or a third agent slots in behind one of those; anything else is a change to the loop.
+The only sanctioned extension points are `FuzzEngine`, `Scanner`, and `AgentHandle`. A second fuzz engine or a third agent slots in behind one of those; anything else is a change to the loop. `LibFuzzerTarget` is not a fourth: it is the split between the two adapters that already sit behind `FuzzEngine`, and it exists because both of them were in hand.
 
 ## A round
 
@@ -70,6 +70,8 @@ The order isn't arbitrary. Scanners run before fuzzers so a round's findings has
 
 Findings carry across rounds: a carried finding wins over a fresh copy of itself, because it holds the confirmed state and the repro established earlier. A crash the re-fuzz pass turns up that isn't already open enters the next round confirmed, since the fuzzer just reproduced it and needs nobody to vouch for it.
 
+The fix prompt asks for a test alongside the fix, whenever the module being changed already has a sibling test file. A repro proves one input is dead; it says nothing about the next spelling of the same shape, and the repro is retired once the finding closes. The test is what holds the ground afterwards.
+
 ## Decisions, and what they cost
 
 **The broker owns control flow.** No prompt asks a model what to do next, which agent should take something, or whether the loop continues. Routing is a static table; termination is four mechanical conditions. The cost is that crossfire can't adapt its strategy to a target: adding a new kind of work is a code change, not a prompt change. That's the trade being made deliberately, because a loop a model can talk into another round is a loop with no upper bound on cost or scope.
@@ -77,6 +79,8 @@ Findings carry across rounds: a carried finding wins over a fresh copy of itself
 **Detectors find; models confirm.** A model is never the primary detector and never the sole judge of whether a bug is real. The cost is that crossfire is blind to bug classes no detector models. The cold hunt pass is the hedge, and it's off by default and structurally demoted: what it raises is a candidate, the broker assigns the id, and it buys its way into a fix round with a repro the broker ran.
 
 **One exit code decides everything.** A finding survives if and only if its repro exits 0. The cost is that a run is exactly as good as its repros, and a lazily written repro can close a bug that's still there. The mitigation is that repros are executed before they're adopted: the broker runs Grok's proposed command and keeps the detector's original unless the proposal actually reproduces. Anything that can't run to completion is inconclusive rather than a pass.
+
+**A finding is identified by what it is, not by where it sits.** A scanner finding hashes the rule, the file, and the source the rule flagged; a crash hashes its stack signature. Line numbers are deliberately absent from both, because a fix shifts every line below it and a line-keyed id turns the finding just closed into a brand new one, which costs a confirmation turn every round and hides whether a bug came back. The cost is that two identical flagged constructs in one file collapse into one finding, and two distinct bugs in one function collapse into one crash. Both are the right unit of work more often than not, and the fuzzer keeps the raw artifact alongside the minimized one so an over-eager signature is still recoverable.
 
 **Agent turns are stateless.** Every turn opens a fresh ACP session and receives the current findings plus the diff of what earlier rounds changed. The cost is tokens: context is re-sent every turn. The gain is that a round's behavior is a function of its inputs, so nothing accumulates that isn't in the ledger or the diff.
 
@@ -86,7 +90,7 @@ Findings carry across rounds: a carried finding wins over a fresh copy of itself
 
 **Fuzzing is bounded and seeded.** The seed is fixed at 1 so a run is reproducible, the budget is split across harnesses, and the post-fix cross-check gets 60s rather than a detection pass. The cost is shallower coverage than an unbounded campaign. crossfire is a repair loop, not a fuzzing rig; the deep campaign belongs upstream, and its crashes arrive here as a corpus.
 
-**The engine seam exists ahead of its second implementation.** `FuzzEngine` is an interface with one adapter, libFuzzer, and the config schema accepts three engines that have none. That's a deliberate inconsistency: a harness configured for `jazzer` produces a detector run that says so rather than a schema error, which keeps the config honest about intent while the adapter is missing.
+**The engine seam has two adapters and a shared driver.** libFuzzer and Jazzer.js both speak libFuzzer's command line, so the loop that restarts a harness, deduplicates by crash signature, minimizes, and proves an artifact replays lives once in `detection/libfuzzer-driver.ts`, and each engine supplies only how it is launched, how its crash output reads, and how serious its crash kinds are. The schema still accepts `afl++`, `jazzer`, and `atheris`, which have no adapter: a harness configured for one produces a detector run that says so rather than a schema error, which keeps the config honest about intent while the adapter is missing.
 
 ## Two implementation notes worth knowing
 

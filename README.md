@@ -13,7 +13,7 @@ crossfire points two ACP coding agents at a target repository and keeps every de
 
 - Node 20 or newer, and `git`.
 - A target that is its own git repository, since every round commits into it.
-- For the detectors: [semgrep](https://semgrep.dev), [osv-scanner](https://github.com/google/osv-scanner), and a fuzz harness built for libFuzzer.
+- For the detectors: [semgrep](https://semgrep.dev), [osv-scanner](https://github.com/google/osv-scanner), and a fuzz harness for libFuzzer (C, C++) or [Jazzer.js](https://github.com/CodeIntelligenceTesting/jazzer.js) (JavaScript, TypeScript).
 - For the agents: the `claude` and `grok` CLIs, installed and logged in.
 
 Only Node and git are needed for a `--dry-run`. Platform notes and the full install path are in [docs/installation.md](docs/installation.md).
@@ -73,7 +73,7 @@ Every flag, every config field, and worked examples: [docs/usage.md](docs/usage.
 
 ## What it does
 
-- Runs Semgrep, OSV-Scanner, and libFuzzer against the configured scope, then collapses what they report into one deduplicated set of findings keyed on the bug rather than on the tool that saw it.
+- Runs Semgrep, OSV-Scanner, and a fuzzer against the configured scope, then collapses what they report into one deduplicated set of findings keyed on the bug rather than on the tool that saw it.
 - Sends scanner candidates to Grok, which either dismisses one or hands back a repro command. The broker runs that command before the candidate is allowed anywhere near a fix.
 - Routes fixes to Claude, the only agent with write access. Grok gets read and execute, enforced in the ACP permission and filesystem handlers rather than asked for in prompt text.
 - Judges every fix on one thing: the repro exits 0 or it does not.
@@ -86,7 +86,7 @@ Every flag, every config field, and worked examples: [docs/usage.md](docs/usage.
 
 ```mermaid
 flowchart LR
-  D[detectors<br/>semgrep, osv-scanner, libFuzzer] --> B{broker}
+  D[detectors<br/>semgrep, osv-scanner, libFuzzer, Jazzer.js] --> B{broker}
   B -->|confirm, analyze| G[Grok<br/>read + execute]
   B -->|fix| C[Claude<br/>write]
   G --> B

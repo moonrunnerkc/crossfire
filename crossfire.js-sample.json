@@ -1,0 +1,43 @@
+{
+  "task": "Find and close the frame decoder's out of range read in the JavaScript target",
+  "target": {
+    "repoPath": "./fixtures/vulnerable-js-repo",
+    "inScopeDirs": ["src"],
+    "buildCommand": "./build.sh",
+    "testCommand": "./test.sh"
+  },
+  "loop": {
+    "iterationCap": 5,
+    "severityBar": "medium",
+    "turnTimeoutMs": 300000
+  },
+  "supplemental": {
+    "coldHunt": false,
+    "planner": false
+  },
+  "detectors": {
+    "semgrep": {
+      "enabled": false,
+      "ruleset": "p/javascript",
+      "timeBudgetMs": 120000
+    },
+    "osvScanner": {
+      "enabled": false,
+      "lockfiles": ["package-lock.json"],
+      "timeBudgetMs": 60000
+    },
+    "fuzz": {
+      "enabled": true,
+      "timeBudgetMs": 120000,
+      "harnesses": [
+        {
+          "id": "decode-frame",
+          "language": "javascript",
+          "engine": "jazzer.js",
+          "entryPoint": "fuzz/decode-frame.fuzz.js",
+          "corpusDir": "fuzz/corpus/decode-frame"
+        }
+      ]
+    }
+  }
+}

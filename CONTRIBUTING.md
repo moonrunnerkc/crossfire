@@ -52,7 +52,7 @@ Beyond that: fail closed on malformed input, don't coerce a bad shape into a usa
 
 Adding to crossfire usually means one of these, and each has an existing shape to copy:
 
-- **A fuzz engine.** Implement `FuzzEngine` in `detection/`, then add it to `engineFor` in `detection/fuzz.ts`. `libfuzzer.ts` is the reference, including how a crash is deduplicated, minimized, and proved to replay before it ships as a finding.
+- **A fuzz engine.** Add it to `ENGINE_ADAPTERS` in `detection/fuzz.ts`, which is a record over the engine ids, so the schema and the adapters cannot drift apart without a compile error. If the engine speaks libFuzzer's command line, implement `LibFuzzerTarget` and hand it to `libFuzzerDriver`: the restart loop, deduplication, minimization, and proving a crash replays before it ships are already there, and `libfuzzer.ts` and `jazzer-js.ts` are what an engine's own half looks like. If it does not, implement `FuzzEngine` directly.
 - **A scanner.** Implement `Scanner`, then add it to the list in `detection/scan.ts`. Normalize the tool's output into `Finding` with a repro that follows the exit-code convention, and record failures as a `DetectorRun` with a note rather than throwing.
 - **A subtask.** Add it to `SUBTASK_CLASSES` and `ROUTING_TABLE` in `router/capabilities.ts`, write its prompt builder in `broker/prompts.ts`, and add its response schema to `contracts/`. If the new prompt asks a model what should happen next, it's the wrong change: that decision belongs in the state machine.
 

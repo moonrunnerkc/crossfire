@@ -1089,7 +1089,14 @@ describe("the planner slot", () => {
     // Control flow is untouched: same termination, same rounds, same verdicts.
     expect(planned.reason).toBe(plainRun.reason);
     expect(planned.rounds).toBe(plainRun.rounds);
-    expect(planned.entries[0]?.verify_results).toEqual(plainRun.entries[0]?.verify_results);
+    // duration_ms is wall clock, and two runs of the same work do not share it,
+    // so what is compared is the verdicts.
+    expect(planned.entries[0]?.verify_results).toEqual(
+      plainRun.entries[0]?.verify_results.map((verdict) => ({
+        ...verdict,
+        duration_ms: expect.any(Number),
+      })),
+    );
 
     const fixTurn = agents.turns.find((turn) => turn.subtask === "fix");
     expect(fixTurn?.prompt).toContain("One unbounded copy reached from the request line.");

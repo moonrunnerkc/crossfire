@@ -16,7 +16,7 @@ Run these as `node dist/cli.js <command>` from the checkout. The `crossfire` bin
 | --- | --- | --- | --- |
 | `--config <path>` | `run`, `resume` | required | The run config. Paths inside it resolve relative to this file. |
 | `--run-dir <dir>` | `run`, `resume` | `runs/<ISO timestamp>` | Where the ledger, the run log, and the transcripts are written. Required in practice for `resume`, which needs an existing ledger. |
-| `--dry-run` | `run`, `resume` | off | Stubs the detectors and the agents. Nothing else is stubbed. |
+| `--dry-run` | `run`, `resume` | off | Stubs the detectors and the agents, and leaves the target's history alone. Nothing else is stubbed. |
 | `--ledger <path>` | `export` | required | The `ledger.jsonl` to verify and print. |
 | `--out <path>` | `export` | stdout | Write the export here instead of printing it. |
 
@@ -62,9 +62,9 @@ Each harness:
 | Field | Type | Notes |
 | --- | --- | --- |
 | `id` | lowercase slug | Must match `^[a-z0-9][a-z0-9._-]*$` and be unique in the run. |
-| `language` | `c` \| `cpp` \| `java` \| `python` | Checked against the engine. |
-| `engine` | `libfuzzer` \| `afl++` \| `jazzer` \| `atheris` | `libfuzzer` and `afl++` take C and C++, `jazzer` takes Java, `atheris` takes Python. Only `libfuzzer` has an adapter today. |
-| `entryPoint` | path | The built harness binary, relative to the target root. |
+| `language` | `c` \| `cpp` \| `java` \| `javascript` \| `typescript` \| `python` | Checked against the engine. |
+| `engine` | `libfuzzer` \| `afl++` \| `jazzer` \| `jazzer.js` \| `atheris` | `libfuzzer` and `afl++` take C and C++, `jazzer` takes Java, `jazzer.js` takes JavaScript and TypeScript, `atheris` takes Python. `libfuzzer` and `jazzer.js` are the two with adapters. |
+| `entryPoint` | path | Relative to the target root: the built harness binary for `libfuzzer`, the CommonJS module exporting `fuzz` for `jazzer.js`. |
 | `corpusDir` | path | Seed corpus. Copied to a temp directory before fuzzing, so the target's corpus never grows. |
 
 These secret globs are always excluded, on top of whatever `excludedPaths` adds: `.env`, `.env*`, `**/.env*`, `**/.npmrc`, `**/.netrc`, `**/.git-credentials`, `**/.ssh/**`, `**/.aws/**`, `**/.gnupg/**`, `**/secrets/**`, `**/*credentials*`, `**/*.pem`, `**/*.key`, `**/*.p12`, `**/*.pfx`, `**/*.keystore`, `**/id_rsa*`, `**/id_ed25519*`. Symlinks are resolved before the check, so a link pointing at `/etc` or at `.env` is denied on where it lands rather than on how it's spelled.
@@ -80,8 +80,8 @@ These are constants in the gates and the fuzz engine. They're deliberately not c
 | Build command timeout | 600s | `gates/build.ts` |
 | Post-fix re-fuzz budget | 60s | `gates/refuzz.ts` |
 | Fuzz seed | 1 | `detection/fuzz.ts`, fixed so a run is reproducible |
-| libFuzzer per-input timeout | 25s | `detection/libfuzzer.ts`, the ceiling OSS-Fuzz uses, so a hang is a finding |
-| libFuzzer restarts per harness | 32 | `detection/libfuzzer.ts`, a backstop against a harness that crashes instantly forever |
+| Per-input timeout | 25s | `detection/libfuzzer-driver.ts`, the ceiling OSS-Fuzz uses, so a hang is a finding |
+| Restarts per harness | 32 | `detection/libfuzzer-driver.ts`, a backstop against a harness that crashes instantly forever |
 
 ## The repro convention
 
@@ -100,13 +100,13 @@ A fuzzer repro replays the minimized crash artifact through the harness and flip
 
 ### Drive the loop with nothing installed
 
-The dry run stubs the detectors and the agents. The broker, the gates, git, and the ledger are real, which makes it the fastest way to check that a config, a target, and its test command hang together:
+The dry run stubs the detectors and the agents. The broker, the gates, and the ledger are real, which makes it the fastest way to check that a config, a target, and its test command hang together:
 
 ```sh
 node dist/cli.js run --config crossfire.json --dry-run --run-dir runs/dry
 ```
 
-Its one synthetic finding hangs on a marker file written inside the run directory. The repro exits 0 while the marker is absent and the stub fix creates it, so the repro flips exactly the way a real one does and nothing is written into the target beyond the round's commit.
+Its one synthetic finding hangs on a marker file written inside the run directory. The repro exits 0 while the marker is absent and the stub fix creates it, so the repro flips exactly the way a real one does and the target is never touched. The round's ledger entry records the sha the run read rather than one it made, because a dry run has nothing of its own to commit.
 
 ### A real run against the bundled fixture
 
@@ -129,6 +129,27 @@ node dist/cli.js run --config /tmp/crossfire.json
 ```
 
 Each round prints one line per phase, and the same events are written to `run.jsonl` as JSON, so what you watch and what you read afterwards can't drift.
+
+### The JavaScript fixture
+
+`fixtures/vulnerable-js-repo` is the same shape for the Jazzer.js engine: a frame
+decoder that trusts a length field, reached by `fuzz/decode-frame.fuzz.js`, and
+the same decoder behind the bounds check in `fuzz/decode-frame-fixed.fuzz.js`.
+`crossfire.js-sample.json` points at it. `build.sh` is `npm install`, because
+what makes a JavaScript harness runnable is the target's own Jazzer.js.
+
+### Fuzzing crossfire itself
+
+`crossfire.self.json` runs the two harnesses in `fuzz/` against this repository:
+the boundary where a model's answer meets the ledger, and the parsers that
+normalize a fuzz engine's crash output. They load `dist/`, so `npm run build`
+comes first, which is what the config's `buildCommand` does. To run one on its
+own without the loop:
+
+```sh
+npm run build
+node_modules/.bin/jazzer fuzz/crash-report.fuzz.cjs fuzz/corpus/crash-report -- -max_total_time=60
+```
 
 ### Turn on the supplemental passes
 

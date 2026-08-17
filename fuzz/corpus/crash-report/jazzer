@@ -1,0 +1,5 @@
+==60951== Uncaught Exception: RangeError: The value of "offset" is out of range. It must be >= 0 and <= 1. Received 2
+    at boundsError (node:internal/buffer:92:9)
+    at Buffer.readUInt16BE (node:internal/buffer:1012:50)
+    at decodeFrame (/repo/src/decode-frame.js:35:23)
+    at module.exports.fuzz (/repo/fuzz/decode-frame.fuzz.js:6:3)

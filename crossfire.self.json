@@ -1,0 +1,50 @@
+{
+  "task": "Fuzz crossfire's own boundaries: the point where a model's answer meets the ledger, and the parsers that normalize a fuzz engine's crash output",
+  "target": {
+    "repoPath": ".",
+    "inScopeDirs": ["src"],
+    "buildCommand": "npm run build",
+    "testCommand": "npm test"
+  },
+  "loop": {
+    "iterationCap": 3,
+    "severityBar": "medium",
+    "turnTimeoutMs": 600000
+  },
+  "supplemental": {
+    "coldHunt": false,
+    "planner": false
+  },
+  "detectors": {
+    "semgrep": {
+      "enabled": false,
+      "ruleset": "p/typescript",
+      "timeBudgetMs": 300000
+    },
+    "osvScanner": {
+      "enabled": false,
+      "lockfiles": ["package-lock.json"],
+      "timeBudgetMs": 120000
+    },
+    "fuzz": {
+      "enabled": true,
+      "timeBudgetMs": 600000,
+      "harnesses": [
+        {
+          "id": "ledger-boundary",
+          "language": "typescript",
+          "engine": "jazzer.js",
+          "entryPoint": "fuzz/ledger-boundary.fuzz.cjs",
+          "corpusDir": "fuzz/corpus/ledger-boundary"
+        },
+        {
+          "id": "crash-report",
+          "language": "typescript",
+          "engine": "jazzer.js",
+          "entryPoint": "fuzz/crash-report.fuzz.cjs",
+          "corpusDir": "fuzz/corpus/crash-report"
+        }
+      ]
+    }
+  }
+}

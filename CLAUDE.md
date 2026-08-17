@@ -8,7 +8,7 @@ Deterministic broker that orchestrates two ACP coding agents (Claude Code and Gr
 2. Findings originate from deterministic detectors: fuzzers and scanners. A model reasons over and confirms signals; a model is never the primary detector and never the sole judge of whether a bug is real. Grok reasons over confirmed crashes and confirms scanner candidates by building a working repro. It does not hunt cold in the default loop.
 3. Termination is mechanical only: zero confirmed findings surviving a full detect-and-verify pass, the iteration cap, a test-suite regression, or manual abort. Nothing else stops or continues the loop.
 4. A finding is unverified until the broker re-runs its repro command and observes the result. The repro normalizes any detector's native output to the convention below.
-5. Every round appends exactly one hash-chained ledger entry and one git commit. Prior entries are immutable.
+5. Every round appends exactly one hash-chained ledger entry and one git commit. Prior entries are immutable. A dry run is the one exception to the commit: it changes nothing in the target, so it records the sha it ran against instead of making one.
 6. Grok gets read plus execute, never source write. No agent's scope includes secrets or `.env`. Enforce this at the ACP permission and filesystem handlers, not in prompt text.
 7. Agent calls are stateless from our side: pass the current findings and the diff, never the accumulated transcript.
 
@@ -18,7 +18,7 @@ A finding's repro is a shell command. Exit 0 means the vulnerability or crash is
 
 ## Stack
 
-Node 20+ and TypeScript. `@agentclientprotocol/sdk` pinned to the v1 stable entry point; do not import the experimental v2 path, since its wire format can break between SDK releases. `@agentclientprotocol/claude-agent-acp` for the Claude adapter. Grok Build native ACP for the Grok adapter (confirm the launch invocation from `grok --help`, do not assume a flag). Detection layer: Semgrep for SAST, OSV-Scanner for SCA against lockfiles, and a pluggable fuzz-engine interface with a concrete adapter per target language (libFuzzer or AFL++ for C/C++, Jazzer for Java, Atheris for Python). `zod` for all contracts, failing closed on malformed output. `vitest` for tests. `execa` for scoped subprocess runs in the detectors and gates. `git` for per-round commits.
+Node 20+ and TypeScript. `@agentclientprotocol/sdk` pinned to the v1 stable entry point; do not import the experimental v2 path, since its wire format can break between SDK releases. `@agentclientprotocol/claude-agent-acp` for the Claude adapter. Grok Build native ACP for the Grok adapter (confirm the launch invocation from `grok --help`, do not assume a flag). Detection layer: Semgrep for SAST, OSV-Scanner for SCA against lockfiles, and a pluggable fuzz-engine interface with a concrete adapter per target language (libFuzzer or AFL++ for C/C++, Jazzer for Java, Jazzer.js for JavaScript/TypeScript, Atheris for Python). `zod` for all contracts, failing closed on malformed output. `vitest` for tests. `execa` for scoped subprocess runs in the detectors and gates. `git` for per-round commits.
 
 ## Engineering posture
 

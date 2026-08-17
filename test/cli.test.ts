@@ -115,17 +115,44 @@ describe("crossfire run --dry-run", () => {
     expect(events.at(-1)?.type).toBe("terminated");
   });
 
-  test("commits one round to the target", async () => {
+  test("leaves the target's history alone", async () => {
     const dir = runDir();
     const target = makeTarget();
+    const headBefore = execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: target,
+      encoding: "utf8",
+    }).trim();
 
     await cli("run", "--config", writeConfig(target), "--dry-run", "--run-dir", dir);
 
+    // A dry run proves the wiring. It has nothing of its own to record, so an
+    // empty commit in the target would be litter rather than evidence.
     const commits = execFileSync("git", ["rev-list", "--count", "HEAD"], {
       cwd: target,
       encoding: "utf8",
     }).trim();
-    expect(commits).toBe("2");
+    expect(commits).toBe("1");
+    expect(
+      execFileSync("git", ["rev-parse", "HEAD"], { cwd: target, encoding: "utf8" }).trim(),
+    ).toBe(headBefore);
+  });
+
+  test("records the sha it ran against, so the ledger still chains", async () => {
+    const dir = runDir();
+    const target = makeTarget();
+    const head = execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: target,
+      encoding: "utf8",
+    }).trim();
+
+    await cli("run", "--config", writeConfig(target), "--dry-run", "--run-dir", dir);
+
+    const entry = readFileSync(join(dir, "ledger.jsonl"), "utf8")
+      .split("\n")
+      .filter((line) => line.trim().length > 0)
+      .map((line) => JSON.parse(line) as { git_sha: string })[0];
+    expect(entry?.git_sha).toBe(head);
+    expect(verifyLedger(join(dir, "ledger.jsonl"))).toEqual({ ok: true, entries: 1 });
   });
 });
 

@@ -1,0 +1,6 @@
+==35547==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x604000036ff8 at pc 0x00010482d120
+WRITE of size 34 at 0x604000036ff8 thread T0
+    #0 0x00010482d11c in strcpy+0x534 (libclang_rt.asan_osx_dynamic.dylib:arm64+0x4d11c)
+    #1 0x0001041ac9bc in parse_request parse_request.c:32
+    #2 0x0001041acaf0 in LLVMFuzzerTestOneInput parse_request_harness.c:19
+SUMMARY: AddressSanitizer: heap-buffer-overflow parse_request.c:32 in parse_request

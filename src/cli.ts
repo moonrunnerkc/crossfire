@@ -30,8 +30,9 @@ const USAGE = [
   "resume    continue the ledger in an existing run directory",
   "export    verify a ledger's chain and print it",
   "",
-  "--dry-run stubs the detectors and the agents. The broker, the gates, git,",
-  "          and the ledger still run for real.",
+  "--dry-run stubs the detectors and the agents. The broker, the gates, and the",
+  "          ledger still run for real. The target is left alone: a dry run",
+  "          records the sha it ran against rather than committing one.",
 ].join("\n");
 
 export type Out = (text: string) => void;
@@ -115,9 +116,10 @@ async function runCommand(argv: readonly string[], out: Out, resume: boolean): P
       detectors,
       agents,
       resume,
+      dryRun,
       onEvent: (event) => {
         log.write(event);
-        const line = describe(event);
+        const line = describe(event, dryRun);
         if (line !== undefined) {
           out(`${line}\n`);
         }
@@ -189,7 +191,7 @@ function exportCommand(argv: readonly string[], out: Out): number {
 }
 
 /** One line for the events worth watching a run through. */
-function describe(event: RunEvent): string | undefined {
+function describe(event: RunEvent, dryRun: boolean): string | undefined {
   switch (event.type) {
     case "round-started":
       return `round ${event.round}`;
@@ -216,7 +218,8 @@ function describe(event: RunEvent): string | undefined {
     case "refuzzed":
       return `  re-fuzz found ${event.new_findings.length} new`;
     case "round-committed":
-      return `  committed ${event.git_sha.slice(0, 10)}`;
+      // A dry run makes no commit, so it reports the sha it read instead.
+      return `  ${dryRun ? "ran against" : "committed"} ${event.git_sha.slice(0, 10)}`;
     case "terminated":
       return `crossfire: ${event.reason} after ${event.rounds} round(s)`;
     default:

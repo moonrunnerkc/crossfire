@@ -75,14 +75,17 @@ Detector problems don't stop a run. They land in `run.jsonl` and in the ledger a
 | Note | What happened |
 | --- | --- |
 | `disabled in the run config` | `enabled: false` for that detector. |
-| `no fuzz engine adapter for afl++` | The engine is valid in the schema but only `libfuzzer` is implemented. |
+| `no fuzz engine adapter for afl++` | The engine is valid in the schema but only `libfuzzer` and `jazzer.js` are implemented. |
 | `harness binary build/parse-request-fuzzer is not built` | `entryPoint` doesn't exist. Set `buildCommand` so it's built before detection. |
+| `harness module fuzz/parse.fuzz.cjs does not exist` | The Jazzer.js `entryPoint` is relative to the target root, and TypeScript is fuzzed through its compiled output. |
+| `node_modules/.bin/jazzer is missing` | `@jazzer.js/core` is a dependency of the target, not of crossfire. Set `buildCommand` to the target's install. |
 | `budget of 1000ms was too short to start the harness` | `detectors.fuzz.timeBudgetMs`, divided by the number of harnesses, left no room to run. |
 | `semgrep exit 7 produced no JSON: <stderr>` | Usually a bad `ruleset`, since the path is resolved inside the target. |
 | `semgrep exceeded its 120000ms budget` | Raise `timeBudgetMs` or narrow `inScopeDirs`. |
 | `every in-scope directory is excluded` | The exclusion set swallowed the scope. Check `excludedPaths` against the secret defaults. |
 | `every configured lockfile is outside the scope or excluded` | Lockfile paths are relative to the target root, not to your shell. |
-| `libFuzzer exited 1 without a crash artifact: <stderr>` | The harness aborted for a reason libFuzzer didn't record, often a missing runtime dependency. |
+| `libfuzzer exited 1 without a crash artifact: <stderr>` | The harness aborted for a reason libFuzzer didn't record, often a missing runtime dependency. |
+| `jazzer.js exited 1 without a crash artifact: <stderr>` | The harness module threw while loading, so nothing was fuzzed. The stderr tail names what it could not require. |
 
 Findings below `loop.severityBar` are dropped at detection, before any agent sees them. A run that detects plenty and confirms nothing is usually a bar set too high, and `severityBar` applies to what the detector reported, not to what a model later called it.
 

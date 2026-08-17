@@ -75,6 +75,13 @@ export interface RunOptions {
    * a resumed run cannot spend the budget twice.
    */
   resume?: boolean;
+  /**
+   * Stubbed detectors and agents, so the round has nothing of its own to commit.
+   * The gates, git reads, and the ledger still run for real; only the round
+   * commit is skipped, because an empty commit in someone's history is a side
+   * effect of proving the wiring, not a record of anything that happened.
+   */
+  dryRun?: boolean;
 }
 
 export interface RunResult {
@@ -428,10 +435,16 @@ export async function runLoop(options: RunOptions): Promise<RunResult> {
         emit({ type: "refuzzed", round, runs: outcome.runs, new_findings: outcome.newFindings });
       }
 
-      const gitSha = await commitRound(
-        repoPath,
-        `crossfire round ${round}: ${batchFindings.length} confirmed, ${batchFindings.length - unresolved.length} closed, tests ${gate.result.status}`,
-      );
+      // A dry run changes nothing in the target, so it records the sha it ran
+      // against instead of making one. The ledger entry is still written and
+      // still chains: what it attests is a round that touched nothing.
+      const gitSha =
+        options.dryRun === true
+          ? await headSha(repoPath)
+          : await commitRound(
+              repoPath,
+              `crossfire round ${round}: ${batchFindings.length} confirmed, ${batchFindings.length - unresolved.length} closed, tests ${gate.result.status}`,
+            );
       const entry = ledger.append({
         round,
         started_at: startedAt,

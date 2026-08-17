@@ -29,8 +29,9 @@ export const LOOP_DEFAULTS = {
   turnTimeoutMs: 300_000,
 } as const;
 
-export const FUZZ_ENGINES = ["libfuzzer", "afl++", "jazzer", "atheris"] as const;
-export const FUZZ_LANGUAGES = ["c", "cpp", "java", "python"] as const;
+/** jazzer is the JVM tool; jazzer.js is the Node one, a separate CLI and output format. */
+export const FUZZ_ENGINES = ["libfuzzer", "afl++", "jazzer", "jazzer.js", "atheris"] as const;
+export const FUZZ_LANGUAGES = ["c", "cpp", "java", "javascript", "typescript", "python"] as const;
 
 export const FuzzEngineSchema = z.enum(FUZZ_ENGINES);
 export const FuzzLanguageSchema = z.enum(FUZZ_LANGUAGES);
@@ -42,6 +43,10 @@ export const ENGINE_LANGUAGES: Record<FuzzEngine, readonly FuzzLanguage[]> = {
   libfuzzer: ["c", "cpp"],
   "afl++": ["c", "cpp"],
   jazzer: ["java"],
+  // TypeScript reaches Jazzer.js as its compiled output, so the harness entry
+  // point is JavaScript either way. The language is still worth stating: it is
+  // what a reader needs to know to find the source the crash came from.
+  "jazzer.js": ["javascript", "typescript"],
   atheris: ["python"],
 };
 

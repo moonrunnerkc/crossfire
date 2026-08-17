@@ -14,4 +14,15 @@ export default tseslint.config(
       "@typescript-eslint/consistent-type-imports": "error",
     },
   },
+  // The fuzz harnesses are CommonJS on purpose: Jazzer.js loads a fuzz target
+  // through require, and its source map support only follows that path, so an
+  // ESM harness reports crash locations in the instrumented source instead.
+  {
+    files: ["fuzz/**/*.cjs"],
+    languageOptions: {
+      sourceType: "commonjs",
+      globals: { module: "writable", require: "readonly" },
+    },
+    rules: { "@typescript-eslint/no-require-imports": "off" },
+  },
 );

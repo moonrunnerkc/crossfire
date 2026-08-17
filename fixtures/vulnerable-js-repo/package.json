@@ -1,0 +1,12 @@
+{
+  "name": "vulnerable-js-repo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Deliberately insecure JavaScript target for crossfire's Jazzer.js adapter",
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@jazzer.js/core": "^4.0.0"
+  }
+}

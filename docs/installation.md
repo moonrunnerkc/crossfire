@@ -11,6 +11,7 @@ crossfire is a CLI you build from source. There's no published package and no co
 | semgrep | any | the SAST detector | `semgrep --version` |
 | osv-scanner | any | the SCA detector | `osv-scanner --version` |
 | clang with libFuzzer | any | building fuzz harnesses for C and C++ targets | the probe below |
+| @jazzer.js/core | 4 or newer | fuzz harnesses for JavaScript and TypeScript targets | installed in the target, not here |
 | claude | any | fix turns | `claude --version` |
 | grok | 1.0.4 or newer | analysis and confirmation turns | `grok --version` |
 
@@ -40,7 +41,11 @@ crossfire shells out to these by name and records what happened rather than thro
 - Semgrep: [semgrep.dev/docs/getting-started](https://semgrep.dev/docs/getting-started)
 - OSV-Scanner: [github.com/google/osv-scanner](https://github.com/google/osv-scanner)
 
-For fuzzing, the harness is built by the target's own build command, not by crossfire, so what you need is a compiler that target can use. Ask a clang whether it can link a fuzz target rather than trusting its name, because `--version` tells you nothing about the runtime:
+For fuzzing, the harness is prepared by the target's own build command, not by crossfire, so what you need is whatever that target builds with.
+
+### clang, for C and C++ targets
+
+Ask a clang whether it can link a fuzz target rather than trusting its name, because `--version` tells you nothing about the runtime:
 
 ```sh
 printf '#include <stddef.h>\n#include <stdint.h>\nint LLVMFuzzerTestOneInput(const uint8_t *d, size_t s) { (void)d; (void)s; return 0; }\n' \
@@ -57,7 +62,24 @@ build.sh: no clang with the libFuzzer runtime found.
 
 On Linux, a clang packaged with compiler-rt is enough.
 
-Only libFuzzer has an engine adapter today. The config schema accepts `afl++`, `jazzer`, and `atheris`, and a harness configured with any of them produces a detector run noting `no fuzz engine adapter for afl++`.
+### Jazzer.js, for JavaScript and TypeScript targets
+
+crossfire runs a JavaScript harness with the target's own Jazzer.js, spawned as
+`node_modules/.bin/jazzer` from the target root, so `@jazzer.js/core` is a
+dependency of the target rather than of crossfire. A target missing it produces
+a detector run saying so instead of an empty pass.
+
+A harness is a CommonJS module exporting `fuzz(data)`, where `data` is a Buffer.
+CommonJS rather than ESM on purpose: Jazzer.js instruments the code it loads and
+only rewrites stack traces back to the original lines for modules it loaded
+through `require`, so an ESM harness reports crash locations in the instrumented
+source. A TypeScript target is fuzzed through its compiled output, which is what
+the harness requires. `fixtures/vulnerable-js-repo` is a worked example, and
+`fuzz/` in this repo is crossfire fuzzing itself.
+
+libFuzzer and Jazzer.js are the engines with adapters. The config schema also
+accepts `afl++`, `jazzer`, and `atheris`, and a harness configured with any of
+them produces a detector run noting `no fuzz engine adapter for afl++`.
 
 ## The agents
 

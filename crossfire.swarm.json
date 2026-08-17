@@ -1,0 +1,58 @@
+{
+  "task": "Close security findings in swarm-orchestrator's src directory. Semgrep for SAST, OSV-Scanner for SCA against package-lock.json, and Jazzer.js against the three harnesses in fuzz/: what a model returned arriving at the tool chokepoint, what reaches the evidence ledger, and what the config parser is handed.",
+  "target": {
+    "repoPath": "/Users/brad/projects/swarm-orchestrator",
+    "inScopeDirs": ["src"],
+    "excludedPaths": ["**/.env*", ".swarm/**", "**/*.token", "**/*.secret", "**/*.test.ts"],
+    "buildCommand": "npm run typecheck && npm run fuzz:build",
+    "testCommand": "npm test"
+  },
+  "loop": {
+    "iterationCap": 2,
+    "severityBar": "medium",
+    "turnTimeoutMs": 900000
+  },
+  "supplemental": {
+    "coldHunt": false,
+    "planner": false
+  },
+  "detectors": {
+    "semgrep": {
+      "enabled": true,
+      "ruleset": "p/default",
+      "timeBudgetMs": 300000
+    },
+    "osvScanner": {
+      "enabled": true,
+      "lockfiles": ["package-lock.json"],
+      "timeBudgetMs": 120000
+    },
+    "fuzz": {
+      "enabled": true,
+      "timeBudgetMs": 900000,
+      "harnesses": [
+        {
+          "id": "adapter-output",
+          "language": "typescript",
+          "engine": "jazzer.js",
+          "entryPoint": "fuzz/adapter-output.fuzz.cjs",
+          "corpusDir": "fuzz/corpus/adapter-output"
+        },
+        {
+          "id": "ledger-chain",
+          "language": "typescript",
+          "engine": "jazzer.js",
+          "entryPoint": "fuzz/ledger-chain.fuzz.cjs",
+          "corpusDir": "fuzz/corpus/ledger-chain"
+        },
+        {
+          "id": "swarm-toml",
+          "language": "typescript",
+          "engine": "jazzer.js",
+          "entryPoint": "fuzz/swarm-toml.fuzz.cjs",
+          "corpusDir": "fuzz/corpus/swarm-toml"
+        }
+      ]
+    }
+  }
+}

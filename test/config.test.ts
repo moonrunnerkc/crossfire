@@ -188,6 +188,30 @@ describe("loadRunConfig", () => {
     expect(() => loadRunConfig(writeConfig(raw))).toThrow(/jazzer/);
   });
 
+  test.each(["javascript", "typescript"])("accepts a %s harness on jazzer.js", (language) => {
+    const raw = minimalConfig();
+    const fuzz = (raw.detectors as Record<string, Record<string, unknown>>).fuzz!;
+    const harness = (fuzz.harnesses as Record<string, unknown>[])[0]!;
+    Object.assign(harness, { language, engine: "jazzer.js", entryPoint: "fuzz/parse.fuzz.cjs" });
+
+    const config = loadRunConfig(writeConfig(raw));
+
+    expect(config.detectors.fuzz.harnesses[0]).toMatchObject({ language, engine: "jazzer.js" });
+  });
+
+  test("rejects a JavaScript harness on the JVM jazzer engine", () => {
+    const raw = minimalConfig();
+    const fuzz = (raw.detectors as Record<string, Record<string, unknown>>).fuzz!;
+    Object.assign((fuzz.harnesses as Record<string, unknown>[])[0]!, {
+      language: "javascript",
+      engine: "jazzer",
+    });
+
+    expect(() => loadRunConfig(writeConfig(raw))).toThrow(
+      /jazzer does not support language javascript/,
+    );
+  });
+
   test("rejects duplicate harness ids", () => {
     const raw = minimalConfig();
     const fuzz = (raw.detectors as Record<string, Record<string, unknown>>).fuzz!;

@@ -1,0 +1,5 @@
+Patched the unbounded copy in the request parser.
+
+```json
+{"round":1,"agent":"claude","fixes":[{"finding_id":"fuzz-4b21c9de7a10","files_changed":["src/parse_request.c"],"summary":"bounded both copies against the destination size"}]}
+```

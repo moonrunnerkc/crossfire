@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { z } from "zod";
 
 import type { RunConfig } from "../config/index.js";
@@ -9,10 +12,14 @@ import type { DetectionScope, DetectorOutcome, Scanner } from "./types.js";
 
 type SemgrepConfig = RunConfig["detectors"]["semgrep"];
 
+/** Byte offsets into the file, which is how the flagged construct is read back. */
+const byteOffset = z.number().int().nonnegative().optional();
+
 const SemgrepResultSchema = z.object({
   check_id: z.string().min(1),
   path: z.string().min(1),
-  start: z.object({ line: z.number().int().nonnegative() }),
+  start: z.object({ line: z.number().int().nonnegative(), offset: byteOffset }),
+  end: z.object({ offset: byteOffset }).optional(),
   extra: z.object({
     message: z.string().optional(),
     severity: z.string().optional(),
@@ -77,17 +84,52 @@ function reproCommand(config: SemgrepConfig, result: SemgrepResult): string {
 export function normalizeSemgrepOutput(
   output: z.infer<typeof SemgrepOutputSchema>,
   config: SemgrepConfig,
+  repoPath: string,
 ): Finding[] {
-  return output.results.map((result) => toFinding(config, result));
+  const sources = new Map<string, string>();
+  return output.results.map((result) =>
+    toFinding(config, result, flaggedSource(result, repoPath, sources)),
+  );
 }
 
-function toFinding(config: SemgrepConfig, result: SemgrepResult): Finding {
+/**
+ * The source the rule matched, read back out of the file by byte offset. Semgrep
+ * reports the matched text itself only when the CLI is logged in, so `extra.lines`
+ * comes back as "requires login" and cannot be used. An empty string here means
+ * the id identifies the finding by rule and file alone.
+ */
+function flaggedSource(
+  result: SemgrepResult,
+  repoPath: string,
+  sources: Map<string, string>,
+): string {
+  const start = result.start.offset;
+  const end = result.end?.offset;
+  if (start === undefined || end === undefined || end <= start) {
+    return "";
+  }
+
+  let source = sources.get(result.path);
+  if (source === undefined) {
+    try {
+      source = readFileSync(resolve(repoPath, result.path), "utf8");
+    } catch {
+      // A path semgrep reported but we cannot open. The finding still stands, it
+      // just identifies itself more coarsely.
+      source = "";
+    }
+    sources.set(result.path, source);
+  }
+  return source.slice(start, end);
+}
+
+function toFinding(config: SemgrepConfig, result: SemgrepResult, flagged: string): Finding {
   const bugClass = classOf(result);
   const line = result.start.line > 0 ? result.start.line : undefined;
   const message = (result.extra.message ?? "").trim();
 
   return {
-    id: sastFindingId(bugClass, result.path, line),
+    id: sastFindingId(result.check_id, result.path, flagged),
     source: "sast",
     confirmation_state: "candidate",
     severity: severityOf(result),
@@ -193,7 +235,7 @@ export function createSemgrepScanner(config: SemgrepConfig): Scanner {
         };
       }
 
-      const findings = normalizeSemgrepOutput(output.data, config);
+      const findings = normalizeSemgrepOutput(output.data, config, scope.repoPath);
       const scanErrors = output.data.errors ?? [];
       if (scanErrors.length > 0) {
         notes.push(

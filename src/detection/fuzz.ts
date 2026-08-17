@@ -1,6 +1,7 @@
 import type { FuzzEngine as FuzzEngineId, RunConfig } from "../config/index.js";
 import type { DetectorRun, Finding } from "../contracts/index.js";
 import { dedupeFindings } from "./identity.js";
+import { createJazzerJsEngine } from "./jazzer-js.js";
 import { createLibFuzzerEngine } from "./libfuzzer.js";
 import { scopeOf } from "./scope.js";
 import type { DetectionResult, FuzzEngine } from "./types.js";
@@ -8,9 +9,18 @@ import type { DetectionResult, FuzzEngine } from "./types.js";
 /** Fixed so a run is reproducible; override per run when you want variety. */
 export const DEFAULT_FUZZ_SEED = 1;
 
-function engineFor(engine: FuzzEngineId): FuzzEngine | undefined {
-  return engine === "libfuzzer" ? createLibFuzzerEngine() : undefined;
-}
+/**
+ * Every engine the config schema accepts, and the adapter that runs it. A
+ * record rather than a lookup with a fallback, so an engine added to the schema
+ * fails to compile here until it either names an adapter or says it has none.
+ */
+const ENGINE_ADAPTERS: Record<FuzzEngineId, (() => FuzzEngine) | undefined> = {
+  libfuzzer: createLibFuzzerEngine,
+  "jazzer.js": createJazzerJsEngine,
+  "afl++": undefined,
+  jazzer: undefined,
+  atheris: undefined,
+};
 
 /**
  * Runs every configured harness within the fuzz budget and returns the crashes
@@ -45,7 +55,7 @@ export async function runFuzzers(
   const collected: Finding[] = [];
 
   for (const harness of fuzz.harnesses) {
-    const engine = engineFor(harness.engine);
+    const engine = ENGINE_ADAPTERS[harness.engine]?.();
     if (engine === undefined) {
       runs.push({
         detector: "fuzz",
