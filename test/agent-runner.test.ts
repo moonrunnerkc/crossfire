@@ -48,12 +48,14 @@ interface Recorded {
   handle: AgentHandle;
   prompts: string[];
   sessions: () => number;
+  closes: () => number;
 }
 
 /** An in-memory handle, for the assertions that are about the runner, not the wire. */
 function recordingHandle(id: AgentId, answer: string): Recorded {
   const prompts: string[] = [];
   let sessions = 0;
+  let closes = 0;
 
   const handle: AgentHandle = {
     id,
@@ -70,17 +72,20 @@ function recordingHandle(id: AgentId, answer: string): Recorded {
       })();
     },
     cancel: () => Promise.resolve(),
-    close: () => Promise.resolve(),
+    close: () => {
+      closes += 1;
+      return Promise.resolve();
+    },
   };
 
-  return { handle, prompts, sessions: () => sessions };
+  return { handle, prompts, sessions: () => sessions, closes: () => closes };
 }
 
 describe("the agent runner over a live ACP handle", () => {
   test(
     "returns what the agent said as one string",
     async () => {
-      const runner = createAgentRunner({ claude: await connectFake("claude") });
+      const runner = createAgentRunner({ claude: () => connectFake("claude") });
 
       const answer = await runner.run({
         subtask: "fix",
@@ -98,7 +103,7 @@ describe("the agent runner over a live ACP handle", () => {
   test(
     "a turn that says nothing halts rather than returning an empty answer",
     async () => {
-      const runner = createAgentRunner({ grok: await connectFake("grok") });
+      const runner = createAgentRunner({ grok: () => connectFake("grok") });
 
       await expect(
         runner.run({
@@ -117,7 +122,7 @@ describe("the agent runner over a live ACP handle", () => {
   test(
     "a turn the agent refuses halts the round",
     async () => {
-      const runner = createAgentRunner({ grok: await connectFake("grok") });
+      const runner = createAgentRunner({ grok: () => connectFake("grok") });
 
       await expect(
         runner.run({
@@ -135,7 +140,7 @@ describe("the agent runner over a live ACP handle", () => {
   test(
     "an aborted turn is cancelled at the agent and reported, not half returned",
     async () => {
-      const runner = createAgentRunner({ claude: await connectFake("claude") });
+      const runner = createAgentRunner({ claude: () => connectFake("claude") });
       const controller = new AbortController();
       setTimeout(() => {
         controller.abort();
@@ -159,7 +164,7 @@ describe("the agent runner picking a handle", () => {
   test("sends the turn to the agent the router named", async () => {
     const claude = recordingHandle("claude", "{}");
     const grok = recordingHandle("grok", "{}");
-    const runner = createAgentRunner({ claude: claude.handle, grok: grok.handle });
+    const runner = createAgentRunner({ claude: () => Promise.resolve(claude.handle), grok: () => Promise.resolve(grok.handle) });
 
     await runner.run({
       subtask: "crash-analysis",
@@ -174,7 +179,7 @@ describe("the agent runner picking a handle", () => {
   });
 
   test("refuses a turn for an agent it was never given", async () => {
-    const runner = createAgentRunner({ claude: recordingHandle("claude", "{}").handle });
+    const runner = createAgentRunner({ claude: () => Promise.resolve(recordingHandle("claude", "{}").handle) });
 
     await expect(
       runner.run({
@@ -189,7 +194,10 @@ describe("the agent runner picking a handle", () => {
 
   test("opens a fresh session per turn so no transcript accumulates", async () => {
     const claude = recordingHandle("claude", "{}");
-    const runner = createAgentRunner({ claude: claude.handle, grok: recordingHandle("grok", "{}").handle });
+    const runner = createAgentRunner({
+      claude: () => Promise.resolve(claude.handle),
+      grok: () => Promise.resolve(recordingHandle("grok", "{}").handle),
+    });
 
     for (const prompt of ["first", "second", "third"]) {
       await runner.run({ subtask: "fix", agent: "claude", round: 1, prompt, signal: neverAborts() });
@@ -197,6 +205,64 @@ describe("the agent runner picking a handle", () => {
 
     expect(claude.sessions()).toBe(3);
     expect(claude.prompts).toEqual(["first", "second", "third"]);
+  });
+
+  /**
+   * A run held both agents open from the start, so Claude's process waited
+   * through detection and every Grok turn before its first session, and was gone
+   * by the time one was asked for. The connector is called per turn so nothing
+   * is connected while it is not being used.
+   */
+  test("connects for the turn it is about to run, not before", async () => {
+    const claude = recordingHandle("claude", "{}");
+    let connects = 0;
+    const runner = createAgentRunner({
+      claude: () => {
+        connects += 1;
+        return Promise.resolve(claude.handle);
+      },
+    });
+
+    expect(connects).toBe(0);
+
+    await runner.run({
+      subtask: "fix",
+      agent: "claude",
+      round: 1,
+      prompt: "first",
+      signal: neverAborts(),
+    });
+
+    expect(connects).toBe(1);
+  });
+
+  test("closes the agent when the turn ends, including when it fails", async () => {
+    const good = recordingHandle("claude", "{}");
+    const runner = createAgentRunner({ claude: () => Promise.resolve(good.handle) });
+
+    await runner.run({
+      subtask: "fix",
+      agent: "claude",
+      round: 1,
+      prompt: "first",
+      signal: neverAborts(),
+    });
+    expect(good.closes()).toBe(1);
+
+    // An answer with no text halts the round, and the process still goes away.
+    const silent = recordingHandle("claude", "");
+    const failing = createAgentRunner({ claude: () => Promise.resolve(silent.handle) });
+
+    await expect(
+      failing.run({
+        subtask: "fix",
+        agent: "claude",
+        round: 1,
+        prompt: "second",
+        signal: neverAborts(),
+      }),
+    ).rejects.toThrow(/no text/);
+    expect(silent.closes()).toBe(1);
   });
 });
 

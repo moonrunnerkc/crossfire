@@ -7,7 +7,6 @@ import { parseArgs } from "node:util";
 import { createClaudeAgent, createGrokAgent } from "./adapters/index.js";
 import type { RunConfig } from "./config/index.js";
 import { loadRunConfig } from "./config/index.js";
-import type { AgentId } from "./contracts/index.js";
 import type { AgentRunner, DetectorRunner, RunEvent } from "./broker/index.js";
 import {
   createAgentRunner,
@@ -19,7 +18,6 @@ import {
 import type { Transcript } from "./obs/index.js";
 import { exportLedger, openRunLog, openTranscript } from "./obs/index.js";
 import { createPathScope, createPermissionPolicy } from "./policy/index.js";
-import type { AgentHandle } from "./transport/index.js";
 
 const USAGE = [
   "crossfire run --config <path> [--dry-run] [--run-dir <dir>]",
@@ -95,13 +93,12 @@ async function runCommand(argv: readonly string[], out: Out, resume: boolean): P
 
   const dryRun = values["dry-run"] === true;
   const log = openRunLog(join(runDir, "run.jsonl"));
-  const handles: Partial<Record<AgentId, AgentHandle>> = {};
   const transcripts: Transcript[] = [];
 
   try {
     const agents = dryRun
       ? createDryRunAgents(join(runDir, "dry-run.marker"))
-      : await connectAgents(config, runDir, handles, transcripts);
+      : agentConnectors(config, runDir, transcripts);
     const detectors: DetectorRunner = dryRun
       ? createDryRunDetectors(config, join(runDir, "dry-run.marker"))
       : createDetectorRunner(config);
@@ -132,7 +129,6 @@ async function runCommand(argv: readonly string[], out: Out, resume: boolean): P
     for (const transcript of transcripts) {
       transcript.close();
     }
-    await Promise.all(Object.values(handles).map((handle) => handle.close()));
   }
 }
 
@@ -140,30 +136,37 @@ async function runCommand(argv: readonly string[], out: Out, resume: boolean): P
  * The real agents, each with its permission policy and its own transcript. The
  * policy is what stops Grok writing source; the adapter only decides how the
  * process is launched.
+ *
+ * These are connectors rather than live handles: the runner spawns an agent for
+ * the turn it is about to run and closes it afterwards, so no process waits
+ * through the detection phase to be used. The transcript is opened once and
+ * outlives the processes writing to it, so a run still reads as one stream per
+ * agent rather than one per turn.
  */
-async function connectAgents(
+function agentConnectors(
   config: RunConfig,
   runDir: string,
-  handles: Partial<Record<AgentId, AgentHandle>>,
   transcripts: Transcript[],
-): Promise<AgentRunner> {
+): AgentRunner {
   const scope = createPathScope(config.target.repoPath, config.target.excludedPaths);
   const claudeTranscript = openTranscript(join(runDir, "transcripts", "claude.jsonl"));
   const grokTranscript = openTranscript(join(runDir, "transcripts", "grok.jsonl"));
   transcripts.push(claudeTranscript, grokTranscript);
 
-  handles.claude = await createClaudeAgent({
-    cwd: config.target.repoPath,
-    policy: createPermissionPolicy("claude", scope),
-    hooks: claudeTranscript.hooks,
+  return createAgentRunner({
+    claude: () =>
+      createClaudeAgent({
+        cwd: config.target.repoPath,
+        policy: createPermissionPolicy("claude", scope),
+        hooks: claudeTranscript.hooks,
+      }),
+    grok: () =>
+      createGrokAgent({
+        cwd: config.target.repoPath,
+        policy: createPermissionPolicy("grok", scope),
+        hooks: grokTranscript.hooks,
+      }),
   });
-  handles.grok = await createGrokAgent({
-    cwd: config.target.repoPath,
-    policy: createPermissionPolicy("grok", scope),
-    hooks: grokTranscript.hooks,
-  });
-
-  return createAgentRunner(handles);
 }
 
 function exportCommand(argv: readonly string[], out: Out): number {
