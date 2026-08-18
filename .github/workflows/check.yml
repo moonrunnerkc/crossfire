@@ -1,0 +1,22 @@
+name: check
+
+on: push
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      # typecheck, lint, and the suite, which is what `npm run check` means here.
+      - run: npm run check
+      # The CLI ships from dist, so a build that does not emit is a broken release even
+      # when every test passes against the sources.
+      - run: npm run build
