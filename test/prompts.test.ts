@@ -129,7 +129,21 @@ describe("fix prompt", () => {
       expect(prompt).toContain(finding.id);
       expect(prompt).toContain(finding.repro_command);
     }
-    expect(prompt).toContain("must exit non-zero after your change");
+    expect(prompt).toContain("exits non-zero after your change");
+  });
+
+  /**
+   * Two fixes shipped with no test beside them while this requirement sat in the
+   * constraints list. The model answers to what the prompt calls done, so the
+   * regression case is part of done rather than advice underneath it.
+   */
+  test("counts a regression test as part of done, not as a constraint", () => {
+    const prompt = buildFixPrompt({ config: config(), batch: BATCH });
+
+    const done = prompt.slice(prompt.indexOf("What done means"), prompt.indexOf("Constraints"));
+    expect(done).toContain("regression");
+    expect(done).toContain("sibling test file");
+    expect(done).toContain("files_changed");
   });
 
   test("states the out of scope rule and the in scope directories", () => {

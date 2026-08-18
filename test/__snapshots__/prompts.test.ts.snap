@@ -187,19 +187,24 @@ Findings (2)
    expected secure behavior: the copy is bounded by the size of the destination buffer
 
 What done means
-Every repro command above must exit non-zero after your change, and the
-target's own test suite must still pass: ./test.sh
+Three things, not two.
+1. Every repro command above exits non-zero after your change.
+2. The target's own test suite still passes: ./test.sh
+3. Every module you changed that has a sibling test file has a regression
+   case added to it, covering the shape you closed in the spellings that
+   shape can be written in, not only the one input the repro happens to use.
 The broker re-runs each repro and that suite itself, so a fix that does not
-flip its repro does not count, however well it reads.
+flip its repro does not count, however well it reads. It cannot re-run a test
+you did not write: the repro proves this one input is dead, and the test is
+the only thing that keeps it dead once the repro is gone. A fix that lands
+without one is unfinished, and the next round has no way to tell.
+List those test files in files_changed alongside the source you edited.
 
 Constraints
 - Change only files under the in scope directories.
 - Do not weaken or delete a repro, a test, or a harness to make a check pass.
 - Fix the defect the finding describes, not the symptom its repro happens to trip.
 - Leave findings that are not listed above alone.
-- If a module you change has a sibling test file, extend it with a case for
-  the shape you are closing, in the spellings that shape can be written in.
-  The repro proves this one input is dead; the test is what keeps it dead.
 
 Answer with one JSON object and nothing else:
 {
@@ -240,19 +245,24 @@ Findings (2)
    expected secure behavior: the copy is bounded by the size of the destination buffer
 
 What done means
-Every repro command above must exit non-zero after your change, and the
-target's own test suite must still pass: ./test.sh
+Three things, not two.
+1. Every repro command above exits non-zero after your change.
+2. The target's own test suite still passes: ./test.sh
+3. Every module you changed that has a sibling test file has a regression
+   case added to it, covering the shape you closed in the spellings that
+   shape can be written in, not only the one input the repro happens to use.
 The broker re-runs each repro and that suite itself, so a fix that does not
-flip its repro does not count, however well it reads.
+flip its repro does not count, however well it reads. It cannot re-run a test
+you did not write: the repro proves this one input is dead, and the test is
+the only thing that keeps it dead once the repro is gone. A fix that lands
+without one is unfinished, and the next round has no way to tell.
+List those test files in files_changed alongside the source you edited.
 
 Constraints
 - Change only files under the in scope directories.
 - Do not weaken or delete a repro, a test, or a harness to make a check pass.
 - Fix the defect the finding describes, not the symptom its repro happens to trip.
 - Leave findings that are not listed above alone.
-- If a module you change has a sibling test file, extend it with a case for
-  the shape you are closing, in the spellings that shape can be written in.
-  The repro proves this one input is dead; the test is what keeps it dead.
 
 Changes earlier rounds already made (git diff):
 diff --git a/src/parse_request.c b/src/parse_request.c
@@ -306,19 +316,24 @@ How these relate (summary from the analysis agent, context only):
 Both findings are the same copy.
 
 What done means
-Every repro command above must exit non-zero after your change, and the
-target's own test suite must still pass: ./test.sh
+Three things, not two.
+1. Every repro command above exits non-zero after your change.
+2. The target's own test suite still passes: ./test.sh
+3. Every module you changed that has a sibling test file has a regression
+   case added to it, covering the shape you closed in the spellings that
+   shape can be written in, not only the one input the repro happens to use.
 The broker re-runs each repro and that suite itself, so a fix that does not
-flip its repro does not count, however well it reads.
+flip its repro does not count, however well it reads. It cannot re-run a test
+you did not write: the repro proves this one input is dead, and the test is
+the only thing that keeps it dead once the repro is gone. A fix that lands
+without one is unfinished, and the next round has no way to tell.
+List those test files in files_changed alongside the source you edited.
 
 Constraints
 - Change only files under the in scope directories.
 - Do not weaken or delete a repro, a test, or a harness to make a check pass.
 - Fix the defect the finding describes, not the symptom its repro happens to trip.
 - Leave findings that are not listed above alone.
-- If a module you change has a sibling test file, extend it with a case for
-  the shape you are closing, in the spellings that shape can be written in.
-  The repro proves this one input is dead; the test is what keeps it dead.
 
 Answer with one JSON object and nothing else:
 {
