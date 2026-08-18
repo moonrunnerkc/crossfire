@@ -2,15 +2,25 @@
   "task": "Close security findings in swarm-orchestrator's src directory. Semgrep for SAST, OSV-Scanner for SCA against package-lock.json, and Jazzer.js against the three harnesses in fuzz/: what a model returned arriving at the tool chokepoint, what reaches the evidence ledger, and what the config parser is handed.",
   "target": {
     "repoPath": "/Users/brad/projects/swarm-orchestrator",
-    "inScopeDirs": ["src"],
-    "excludedPaths": ["**/.env*", ".swarm/**", "**/*.token", "**/*.secret", "**/*.test.ts"],
+    "inScopeDirs": [
+      "src"
+    ],
+    "excludedPaths": [
+      "**/.env*",
+      ".swarm/**",
+      "**/*.token",
+      "**/*.secret"
+    ],
     "buildCommand": "npm run typecheck && npm run fuzz:build",
-    "testCommand": "npm test"
+    "testCommand": "npm test",
+    "scanExcludes": [
+      "**/*.test.ts"
+    ]
   },
   "loop": {
-    "iterationCap": 2,
+    "iterationCap": 4,
     "severityBar": "medium",
-    "turnTimeoutMs": 900000
+    "turnTimeoutMs": 1200000
   },
   "supplemental": {
     "coldHunt": false,
@@ -24,7 +34,9 @@
     },
     "osvScanner": {
       "enabled": true,
-      "lockfiles": ["package-lock.json"],
+      "lockfiles": [
+        "package-lock.json"
+      ],
       "timeBudgetMs": 120000
     },
     "fuzz": {

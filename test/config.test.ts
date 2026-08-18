@@ -96,6 +96,31 @@ describe("loadRunConfig", () => {
     expect(config.target.excludedPaths).toContain(".env*");
   });
 
+  /**
+   * Three fixes shipped with no regression test because the test-file glob sat in
+   * excludedPaths, which the permission policy reads: the fix agent was denied the file its
+   * own prompt told it to extend. A scan filter and a permission boundary are separate
+   * questions, so they are separate lists.
+   */
+  test("keeps a scan exclusion out of the permission boundary", () => {
+    const raw = minimalConfig();
+    (raw.target as Record<string, unknown>).scanExcludes = ["**/*.test.ts"];
+
+    const config = loadRunConfig(writeConfig(raw));
+
+    expect(config.target.scanExcludes).toContain("**/*.test.ts");
+    expect(config.target.excludedPaths).not.toContain("**/*.test.ts");
+    for (const pattern of DEFAULT_EXCLUDED_PATHS) {
+      expect(config.target.excludedPaths).toContain(pattern);
+    }
+  });
+
+  test("defaults scan exclusions to empty", () => {
+    const config = loadRunConfig(writeConfig(minimalConfig()));
+
+    expect(config.target.scanExcludes).toEqual([]);
+  });
+
   test("rejects an unknown top level key", () => {
     const raw = minimalConfig();
     raw.mode = "yolo";

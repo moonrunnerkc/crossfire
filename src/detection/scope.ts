@@ -3,11 +3,14 @@ import { createPathScope } from "../policy/index.js";
 import type { DetectionScope } from "./types.js";
 
 export function scopeOf(config: RunConfig): DetectionScope {
+  // Detectors are kept out of both lists. Only excludedPaths reaches the permission policy,
+  // so a path excluded from scanning alone stays writable by the fix agent.
+  const detectorExclusions = [...config.target.excludedPaths, ...config.target.scanExcludes];
   return {
     repoPath: config.target.repoPath,
     inScopeDirs: config.target.inScopeDirs,
-    excludedPaths: config.target.excludedPaths,
-    pathScope: createPathScope(config.target.repoPath, config.target.excludedPaths),
+    excludedPaths: detectorExclusions,
+    pathScope: createPathScope(config.target.repoPath, detectorExclusions),
   };
 }
 

@@ -118,6 +118,14 @@ const TargetSchema = z.strictObject({
     .array(z.string().min(1))
     .default([])
     .transform((patterns) => [...new Set([...DEFAULT_EXCLUDED_PATHS, ...patterns])]),
+  /**
+   * Kept out of detection only, and writable by an agent, which `excludedPaths` is not.
+   * The two were one list, and putting test files in it stopped the fix agent writing the
+   * regression test its own prompt asks for: a scan filter and a permission boundary are
+   * different questions about a path, and answering both from one list means every scan
+   * exclusion silently becomes a place fixes cannot go.
+   */
+  scanExcludes: z.array(z.string().min(1)).default([]),
   testCommand: z.string().min(1),
   /**
    * Run before the first round and after every fix, so the artifacts the repros
