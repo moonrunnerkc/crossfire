@@ -60,5 +60,6 @@ export type RunEvent =
   | { type: "verified"; round: number; results: VerifyResult[] }
   | { type: "tested"; round: number; result: TestResult; regressed: boolean }
   | { type: "refuzzed"; round: number; runs: DetectorRun[]; new_findings: Finding[] }
+  | { type: "rescanned"; round: number; runs: DetectorRun[]; findings: Finding[] }
   | { type: "round-committed"; round: number; git_sha: string; entry_hash: string }
   | { type: "terminated"; reason: TerminationReason; rounds: number };

@@ -6,8 +6,7 @@ import type {
   FixReport,
   LedgerEntry,
   Severity,
-  VerifyResult,
-} from "../contracts/index.js";
+  VerifyResult, FindingVerdict } from "../contracts/index.js";
 import type { ColdHuntRaise } from "../contracts/index.js";
 import {
   CandidateVerdictSchema,
@@ -57,6 +56,19 @@ export interface AgentRunner {
 export interface DetectorRunner {
   detect(round: number): Promise<DetectionResult>;
   refuzz(openFindingIds: readonly string[]): Promise<RefuzzOutcome>;
+  /**
+   * The scanners again, after a fix, so a round ends on a detect-and-verify pass over the
+   * patched source rather than over the source the round started with. Rule 3 asks for that
+   * and the loop did not do it: a fix that closed its repro while leaving a second spelling
+   * of the same defect ended the run clean, because nothing looked again.
+   *
+   * Scanners only. The fuzzers already run post-fix through `refuzz`, and re-running them
+   * here would put a full fuzz budget into every converging round to repeat it.
+   *
+   * Optional because a runner that cannot re-scan should abstain rather than force every
+   * caller to fake one; the real runner implements it and the loop reports when it is absent.
+   */
+  rescan?(round: number): Promise<DetectionResult>;
 }
 
 export interface RunOptions {
@@ -101,6 +113,13 @@ class RunAborted extends Error {}
  * order, which agent gets a subtask, whether a finding is real, and when to
  * stop. Agents answer questions inside a round and never influence its shape.
  */
+/**
+ * How many rounds a carried dismissal is worth before it is re-derived. A dismissal is a
+ * reachability argument about code the id does not cover, so it goes stale in a way a repro
+ * does not, and a closure is therefore never aged: its repro is re-run every round instead.
+ */
+const dismissalLife = 5;
+
 export async function runLoop(options: RunOptions): Promise<RunResult> {
   const { config, detectors, agents } = options;
   const runSignal = options.signal;
@@ -124,6 +143,19 @@ export async function runLoop(options: RunOptions): Promise<RunResult> {
   const entries: LedgerEntry[] = [];
   const analyzedCrashes = new Set<string>();
   let open: Finding[] = [];
+
+  /**
+   * What earlier rounds decided, so this one does not buy it again. Seeded from the ledger,
+   * so a resumed run and a scheduled one inherit it rather than re-deriving every standing
+   * verdict. Keyed by finding id, which hashes the rule, the file and the normalized
+   * construct, so no verdict survives an edit to the thing it judged.
+   */
+  const remembered = new Map<string, FindingVerdict>();
+  for (const entry of entries) {
+    for (const verdict of entry.verdicts ?? []) {
+      remembered.set(verdict.finding_id, verdict);
+    }
+  }
   // Only the turn helper needs this, and threading a round through five call
   // sites to reach it would be worse than one variable the loop owns.
   let currentRound = 0;
@@ -374,9 +406,52 @@ export async function runLoop(options: RunOptions): Promise<RunResult> {
           confirmed.push(finding);
           continue;
         }
+        const carried = remembered.get(finding.id);
+        if (carried?.verdict === "dismissed" && round - carried.decided_in_round < dismissalLife) {
+          // An argument, carried rather than re-derived. It ages out below, because the id
+          // pins the construct that was argued about and not the call sites that made the
+          // argument true: adding a caller that passes model output makes a reachability
+          // dismissal wrong while its id is unchanged.
+          emit({
+            type: "candidate-verdict",
+            round,
+            finding_id: finding.id,
+            confirmed: false,
+            reason: `carried from round ${carried.decided_in_round}`,
+          });
+          continue;
+        }
+        if (carried?.verdict === "closed" && carried.repro_command !== undefined) {
+          // A closure is a repro, so it is re-run rather than re-argued: mechanical, free of
+          // an agent turn, and the only way a regression in an earlier fix gets noticed.
+          const reopened: Finding = {
+            ...finding,
+            confirmation_state: "confirmed",
+            repro_command: carried.repro_command,
+          };
+          const [result] = await verifyFindings(config, [reopened]);
+          if (result?.outcome === "survived") {
+            confirmed.push(reopened);
+          }
+          emit({
+            type: "candidate-verdict",
+            round,
+            finding_id: finding.id,
+            confirmed: result?.outcome === "survived",
+            reason: `repro re-run from round ${carried.decided_in_round}`,
+          });
+          continue;
+        }
+
         const promoted = await confirmCandidate(finding);
         if (promoted !== undefined) {
           confirmed.push(promoted);
+        } else {
+          remembered.set(finding.id, {
+            finding_id: finding.id,
+            verdict: "dismissed",
+            decided_in_round: round,
+          });
         }
       }
       throwIfAborted();
@@ -433,6 +508,24 @@ export async function runLoop(options: RunOptions): Promise<RunResult> {
         detectorRuns.push(...outcome.runs);
         reopened = outcome.newFindings;
         emit({ type: "refuzzed", round, runs: outcome.runs, new_findings: outcome.newFindings });
+
+        // The other half of the same question. A patch can close the repro it was given and
+        // leave the defect reachable by another spelling, which the fuzzers cannot see and a
+        // scanner can.
+        const again = await detectors.rescan?.(round);
+        if (again !== undefined) {
+          detectorRuns.push(...again.runs);
+          const fresh = withinBar(again.findings, config.loop.severityBar).filter(
+            (finding) => remembered.get(finding.id)?.verdict !== "dismissed",
+          );
+          reopened = merge(reopened, fresh);
+          emit({
+            type: "rescanned",
+            round,
+            runs: again.runs,
+            findings: fresh,
+          });
+        }
       }
 
       // What the round says it changed, which is what its commit is allowed to contain. An
@@ -454,6 +547,17 @@ export async function runLoop(options: RunOptions): Promise<RunResult> {
               `crossfire round ${round}: ${batchFindings.length} confirmed, ${batchFindings.length - unresolved.length} closed, tests ${gate.result.status}`,
               fixedFiles,
             );
+      for (const [index, finding] of batchFindings.entries()) {
+        if (verifyResults[index]?.outcome === "closed") {
+          remembered.set(finding.id, {
+            finding_id: finding.id,
+            verdict: "closed",
+            repro_command: finding.repro_command,
+            decided_in_round: round,
+          });
+        }
+      }
+
       const entry = ledger.append({
         round,
         started_at: startedAt,
@@ -462,6 +566,7 @@ export async function runLoop(options: RunOptions): Promise<RunResult> {
         findings_hash: hashPayload(batch),
         fixes_hash: hashPayload(fixReport ?? { round, agent: routeSubtask("fix"), fixes: [] }),
         verify_results: verifyResults,
+        verdicts: [...remembered.values()],
         test_result: gate.result,
         git_sha: gitSha,
       });

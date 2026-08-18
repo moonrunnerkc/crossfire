@@ -44,6 +44,18 @@ export function createDetectorRunner(
       };
     },
 
+    async rescan(): Promise<DetectionResult> {
+      // Scanners only, on the patched source. The fuzzers have their own post-fix pass in
+      // refuzz, and repeating them here would spend a full fuzz budget per converging round.
+      const scanned = await runScanners(config);
+      const { findings, duplicatesDropped } = dedupeFindings(scanned.findings);
+      return {
+        runs: scanned.runs,
+        findings,
+        duplicatesDropped: scanned.duplicatesDropped + duplicatesDropped,
+      };
+    },
+
     refuzz(openFindingIds: readonly string[]): Promise<RefuzzOutcome> {
       return refuzzCrossCheck(config, openFindingIds, {
         timeBudgetMs: options.refuzzBudgetMs ?? DEFAULT_REFUZZ_BUDGET_MS,

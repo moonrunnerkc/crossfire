@@ -50,6 +50,7 @@ function body(round: number): LedgerEntryBody {
     verify_results: [
       { finding_id: "fuzz-1", outcome: "closed", exit_code: 1, duration_ms: 5 },
     ],
+  verdicts: [],
     test_result: { status: "pass", command: "npm test", exit_code: 0, duration_ms: 20 },
     git_sha: "0".repeat(40),
   };

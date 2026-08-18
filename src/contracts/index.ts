@@ -39,6 +39,7 @@ export {
   DETECTOR_IDS,
   DETECTOR_RUN_STATUSES,
   DetectorRunSchema,
+  FindingVerdictSchema,
   LedgerEntryBodySchema,
   LedgerEntrySchema,
   TEST_STATUSES,
@@ -48,6 +49,7 @@ export {
 } from "./ledger.js";
 export type {
   DetectorRun,
+  FindingVerdict,
   LedgerEntry,
   LedgerEntryBody,
   LinkedLedgerEntry,

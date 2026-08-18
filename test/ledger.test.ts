@@ -37,6 +37,7 @@ function body(round: number, overrides: Partial<LedgerEntryBody> = {}): LedgerEn
     verify_results: [
       { finding_id: "fuzz-parse-request-9f21", outcome: "closed", exit_code: 1, duration_ms: 900 },
     ],
+  verdicts: [],
     test_result: { status: "pass", command: "npm test", exit_code: 0, duration_ms: 4_200 },
     git_sha: "0123456789abcdef0123456789abcdef01234567",
     ...overrides,

@@ -1297,3 +1297,82 @@ describe("failing closed on agent output", () => {
     ).rejects.toThrow(/git repository/);
   });
 });
+
+/**
+ * A run raised the same three candidates every time and re-derived the same two dismissals,
+ * at two to thirteen minutes of agent time each. Nothing remembered that a construct had
+ * already been argued about, which is what made a scheduled run uneconomical and a post-fix
+ * re-scan unaffordable.
+ */
+describe("what a round decided is carried into the next one", () => {
+  test("a dismissal is carried rather than argued again", async () => {
+    const target = makeTarget();
+    const agents = stubAgents({
+      "candidate-confirmation": () =>
+        JSON.stringify({
+          status: "dismissed",
+          finding_id: CANDIDATE.id,
+          reason: "the pattern is not reachable",
+        }),
+      "crash-analysis": () => analysisOf(CRASH),
+      // Round one leaves the marker in place, so the crash survives verification and the run
+      // reaches a second round with the same candidate raised again.
+      fix: (turn) => {
+        if (turn.round > 1) {
+          removeMarker(target, "VULNERABLE");
+        }
+        return fixReportOf(turn, [CRASH.id]);
+      },
+    });
+
+    const result = await runLoop({
+      config: configFor(target, { iterationCap: 3 }),
+      ledgerPath: ledgerPath(),
+      detectors: stubDetectors([
+        [CANDIDATE, CRASH],
+        [CANDIDATE, CRASH],
+      ]),
+      agents,
+    });
+
+    expect(result.rounds).toBe(2);
+    // One confirmation turn across both rounds, not one per round.
+    expect(agents.turns.filter((turn) => turn.subtask === "candidate-confirmation")).toHaveLength(
+      1,
+    );
+
+    const [first] = entries(result);
+    expect(first?.verdicts).toContainEqual({
+      finding_id: CANDIDATE.id,
+      verdict: "dismissed",
+      decided_in_round: 1,
+    });
+  });
+
+  test("a closure records the repro that closed it, for the rounds after", async () => {
+    const target = makeTarget();
+    const agents = stubAgents({
+      "crash-analysis": () => analysisOf(CRASH),
+      fix: (turn) => {
+        removeMarker(target, "VULNERABLE");
+        return fixReportOf(turn, [CRASH.id]);
+      },
+    });
+
+    const result = await runLoop({
+      config: configFor(target),
+      ledgerPath: ledgerPath(),
+      detectors: stubDetectors([[CRASH]]),
+      agents,
+    });
+
+    expect(result.reason).toBe("clean");
+    const verdicts = entries(result)[0]?.verdicts ?? [];
+    const closed = verdicts.find((verdict) => verdict.finding_id === CRASH.id);
+
+    // The command travels with the verdict, because a closure is re-run rather than
+    // re-argued: it is the only way an earlier fix regressing gets noticed.
+    expect(closed?.verdict).toBe("closed");
+    expect(closed?.repro_command).toBe(CRASH.repro_command);
+  });
+});

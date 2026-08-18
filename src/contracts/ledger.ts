@@ -38,6 +38,24 @@ export const TestResultSchema = z.strictObject({
   note: z.string().min(1).optional(),
 });
 
+/**
+ * A verdict a round reached about a finding, carried forward so the next round does not buy
+ * it again. Keyed by the finding id, which already hashes the rule, the file and the
+ * normalized construct, so a verdict cannot transfer across an edit to the thing it judged.
+ *
+ * A dismissal is an argument and expires; a closure is a repro and is re-run instead, which
+ * is why the command travels with it. That asymmetry is the honest one: a mechanical check
+ * can be trusted indefinitely, an argument cannot.
+ */
+export const FindingVerdictSchema = z.strictObject({
+  finding_id: z.string().min(1),
+  verdict: z.enum(["dismissed", "closed"]),
+  /** Present for a closure, so a later round can re-run it rather than re-confirm it. */
+  repro_command: z.string().min(1).optional(),
+  /** The round that reached it, so a dismissal can be aged out. */
+  decided_in_round: RoundSchema,
+});
+
 export const LedgerEntryBodySchema = z.strictObject({
   round: RoundSchema,
   started_at: z.iso.datetime(),
@@ -46,6 +64,8 @@ export const LedgerEntryBodySchema = z.strictObject({
   findings_hash: sha256Hex,
   fixes_hash: sha256Hex,
   verify_results: z.array(VerifyResultSchema),
+  /** What this round decided about findings, for the rounds and runs after it. */
+  verdicts: z.array(FindingVerdictSchema).default([]),
   test_result: TestResultSchema,
   git_sha: gitSha,
 });
@@ -57,6 +77,7 @@ export const LedgerEntrySchema = LedgerEntryBodySchema.extend({
 
 export type DetectorRun = z.infer<typeof DetectorRunSchema>;
 export type VerifyResult = z.infer<typeof VerifyResultSchema>;
+export type FindingVerdict = z.infer<typeof FindingVerdictSchema>;
 export type TestResult = z.infer<typeof TestResultSchema>;
 export type LedgerEntryBody = z.infer<typeof LedgerEntryBodySchema>;
 export type LedgerEntry = z.infer<typeof LedgerEntrySchema>;
