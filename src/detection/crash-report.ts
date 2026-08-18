@@ -72,7 +72,11 @@ function parseFrame(body: string): CrashFrame {
     return { functionName: frameName(inModule[1]), module: inModule[2] };
   }
 
-  const located = /^(.*?)\s+(\S+):(\d+)(?::\d+)?$/.exec(body);
+  // The path is matched lazily so the trailing numbers win. A symbolizer that has column
+  // information prints `file.c:32:5`, and a greedy path took `file.c:32` as the file and 5 as
+  // the line: the finding then named a file that does not exist and pointed at the wrong
+  // line. macOS prints no column, so this only ever failed where the runs were not happening.
+  const located = /^(.*?)\s+(\S+?):(\d+)(?::\d+)?$/.exec(body);
   if (located?.[1] !== undefined && located[2] !== undefined && located[3] !== undefined) {
     const line = frameLine(located[3]);
     return {

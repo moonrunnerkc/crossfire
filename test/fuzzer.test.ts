@@ -151,6 +151,21 @@ describe("crash report parsing", () => {
     expect(report?.frames[0]).toEqual({ functionName: "boom", file: "src/a.c" });
   });
 
+  test("a frame with a column keeps the file and the line apart", () => {
+    // The symbolizer on Linux prints file:line:column and the one on macOS prints file:line,
+    // so a greedy path read `src/a.c:3` as the file and 7 as the line. Every run was on
+    // macOS, so this only surfaced when the gates first ran in CI.
+    const withColumn = parseCrashReport(
+      "==1==ERROR: libFuzzer: deadly signal\n    #0 0x1041ac9bc in boom src/a.c:3:7",
+    );
+    const withoutColumn = parseCrashReport(
+      "==1==ERROR: libFuzzer: deadly signal\n    #0 0x1041ac9bc in boom src/a.c:3",
+    );
+
+    expect(withColumn?.frames[0]).toEqual({ functionName: "boom", file: "src/a.c", line: 3 });
+    expect(withoutColumn?.frames[0]).toEqual(withColumn?.frames[0]);
+  });
+
   test("output with no crash in it is not a crash report", () => {
     expect(parseCrashReport("Done 4096 runs in 2 second(s)\n")).toBeUndefined();
   });
