@@ -147,6 +147,66 @@ describe("semgrep scanner", () => {
     expect(findings[0]?.line).toBe(12);
   });
 
+  test("one construct is one finding, however many links the rule matches", () => {
+    // A rule that matches a chained expression reports it once per link, each match one call
+    // longer than the last. Every one is a different flagged source and so a different id,
+    // and at the low bar that was four confirmation turns spent on one five-line function.
+    const rule = "javascript.audit.detect-replaceall-sanitization";
+    const chain = [
+      { start: 100, end: 140 },
+      { start: 100, end: 180 },
+      { start: 100, end: 220 },
+      { start: 100, end: 260 },
+    ];
+
+    const findings = normalizeSemgrepOutput(
+      {
+        results: chain.map((span) => ({
+          check_id: rule,
+          path: "src/render.ts",
+          start: { line: 9, offset: span.start },
+          end: { offset: span.end },
+          extra: { message: "hand-rolled escaping", severity: "INFO" },
+        })),
+      },
+      { enabled: true, ruleset: "p/default", timeBudgetMs: 1000 },
+      FIXTURE,
+    );
+
+    expect(findings).toHaveLength(1);
+  });
+
+  test("two separate matches of one rule in one file stay two findings", () => {
+    // The control on the rule above: nesting is what collapses, not sharing a rule and file.
+    const rule = "c.lang.security.insecure-use-gets-fn.insecure-use-gets-fn";
+    const source = readFileSync(resolve(FIXTURE, "src/parse_request.c"), "utf8");
+    const findings = normalizeSemgrepOutput(
+      {
+        results: [
+          {
+            check_id: rule,
+            path: "src/parse_request.c",
+            start: { line: 9, offset: 0 },
+            end: { offset: 20 },
+            extra: { message: "first", severity: "WARNING" },
+          },
+          {
+            check_id: rule,
+            path: "src/parse_request.c",
+            start: { line: 40, offset: source.length - 20 },
+            end: { offset: source.length },
+            extra: { message: "second", severity: "WARNING" },
+          },
+        ],
+      },
+      { enabled: true, ruleset: "p/default", timeBudgetMs: 1000 },
+      FIXTURE,
+    );
+
+    expect(findings).toHaveLength(2);
+    expect(new Set(findings.map((finding) => finding.id)).size).toBe(2);
+  });
+
   test("a finding keeps its id when a fix above it shifts the line", () => {
     // The defect this pins: a fix shifts every line below it, and a line keyed
     // id turned the finding it had just closed into a brand new one.

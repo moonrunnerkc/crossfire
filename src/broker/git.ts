@@ -43,8 +43,25 @@ export function headSha(repoPath: string): Promise<string> {
  * the ledger a git sha, and a gap in that sequence would be indistinguishable
  * from a round somebody removed.
  */
-export async function commitRound(repoPath: string, message: string): Promise<string> {
-  await git(repoPath, ["add", "-A"]);
+export async function commitRound(
+  repoPath: string,
+  message: string,
+  changed: readonly string[],
+): Promise<string> {
+  // Only what the round said it changed. `git add -A` staged the whole worktree, so anything
+  // else sitting there, a build artifact, a half-finished edit, a file written while the run
+  // was still in its detection phase, landed in the round commit and was attested by the
+  // ledger entry naming its sha. Rule 5 says the entry covers the round's commit, and that
+  // is only true if the commit covers the round.
+  //
+  // An edit the report does not name is therefore not staged and does not reach the commit,
+  // so the finding it was meant to close stays open into the next round. That is the
+  // fail-closed direction, and it is why there is no dirty-workspace halt beside this: a
+  // workspace legitimately holds files the round did not create, and refusing to commit over
+  // them costs a false halt for every one.
+  for (const path of [...new Set(changed)].sort()) {
+    await git(repoPath, ["add", "--", path]);
+  }
   await git(repoPath, [...IDENTITY, "commit", "--allow-empty", "-q", "-m", message]);
   return headSha(repoPath);
 }

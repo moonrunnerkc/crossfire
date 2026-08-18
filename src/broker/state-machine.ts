@@ -435,6 +435,14 @@ export async function runLoop(options: RunOptions): Promise<RunResult> {
         emit({ type: "refuzzed", round, runs: outcome.runs, new_findings: outcome.newFindings });
       }
 
+      // What the round says it changed, which is what its commit is allowed to contain. An
+      // edit the report does not name is simply not staged, so it does not reach the commit
+      // and the finding it was meant to close stays open into the next round. That is the
+      // fail-closed direction, and it is why there is no separate dirty-workspace halt here:
+      // a workspace legitimately holds files the round did not create, and refusing to
+      // commit over them costs a false halt for every one.
+      const fixedFiles = (fixReport?.fixes ?? []).flatMap((fix) => fix.files_changed);
+
       // A dry run changes nothing in the target, so it records the sha it ran
       // against instead of making one. The ledger entry is still written and
       // still chains: what it attests is a round that touched nothing.
@@ -444,6 +452,7 @@ export async function runLoop(options: RunOptions): Promise<RunResult> {
           : await commitRound(
               repoPath,
               `crossfire round ${round}: ${batchFindings.length} confirmed, ${batchFindings.length - unresolved.length} closed, tests ${gate.result.status}`,
+              fixedFiles,
             );
       const entry = ledger.append({
         round,

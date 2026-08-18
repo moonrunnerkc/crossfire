@@ -87,8 +87,50 @@ export function normalizeSemgrepOutput(
   repoPath: string,
 ): Finding[] {
   const sources = new Map<string, string>();
-  return output.results.map((result) =>
+  return outermostMatches(output.results).map((result) =>
     toFinding(config, result, flaggedSource(result, repoPath, sources)),
+  );
+}
+
+/**
+ * One construct, one finding. A rule that matches a chained expression reports it once per
+ * link, each match spanning one more call than the last, and every one of those is a
+ * different flagged source and so a different id: five lines of `escapeHtml` arrived as four
+ * findings, and at a lower severity bar that is four confirmation turns spent arguing about
+ * the same function.
+ *
+ * The same principle the ids already rest on, applied one level up. An id answers "is this
+ * the same finding as before"; this answers "is this the same finding as the one beside it",
+ * and a match wholly inside another match of the same rule in the same file is the inner
+ * spelling of the outer one. The outermost is kept because it is the construct a fix has to
+ * change, and a match with no offsets to compare is kept as itself rather than guessed at.
+ */
+function outermostMatches(results: readonly SemgrepResult[]): readonly SemgrepResult[] {
+  const contains = (outer: SemgrepResult, inner: SemgrepResult): boolean => {
+    const outerStart = outer.start.offset;
+    const outerEnd = outer.end?.offset;
+    const innerStart = inner.start.offset;
+    const innerEnd = inner.end?.offset;
+    if (
+      outerStart === undefined ||
+      outerEnd === undefined ||
+      innerStart === undefined ||
+      innerEnd === undefined
+    ) {
+      return false;
+    }
+    const sameSpan = outerStart === innerStart && outerEnd === innerEnd;
+    return !sameSpan && outerStart <= innerStart && innerEnd <= outerEnd;
+  };
+
+  return results.filter(
+    (candidate) =>
+      !results.some(
+        (other) =>
+          other.check_id === candidate.check_id &&
+          other.path === candidate.path &&
+          contains(other, candidate),
+      ),
   );
 }
 

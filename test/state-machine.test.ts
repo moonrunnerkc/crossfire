@@ -1,5 +1,12 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, test } from "vitest";
@@ -233,6 +240,38 @@ function entries(result: RunResult): LedgerEntry[] {
 }
 
 describe("termination on zero surviving findings", () => {
+  test("the round commit holds what the fix named and nothing else", async () => {
+    // `git add -A` staged the whole worktree, so a stray file sitting in the target landed
+    // in the round commit and was attested by the ledger entry naming its sha. Rule 5 says
+    // the entry covers the round's commit, which is only true if the commit covers the round.
+    const target = makeTarget();
+    const agents = stubAgents({
+      "crash-analysis": () => analysisOf(CRASH),
+      fix: (turn) => {
+        removeMarker(target, "VULNERABLE");
+        writeFileSync(join(target, "src/unrelated.js"), "// nobody's round wrote this\n");
+        return fixReportOf(turn, [CRASH.id]);
+      },
+    });
+
+    const result = await runLoop({
+      config: configFor(target),
+      ledgerPath: ledgerPath(),
+      detectors: stubDetectors([[CRASH]]),
+      agents,
+    });
+
+    expect(result.reason).toBe("clean");
+    const committed = git(target, ["show", "--name-only", "--format=", "HEAD"])
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+
+    expect(committed).toEqual(["src/app.js"]);
+    // Still in the worktree, just not attested by a round that did not claim it.
+    expect(existsSync(join(target, "src/unrelated.js"))).toBe(true);
+  });
+
   test("a round whose fix closes every repro ends the run clean", async () => {
     const target = makeTarget();
     const path = ledgerPath();
