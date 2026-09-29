@@ -21,7 +21,7 @@ export function parseAgentJson<S extends z.ZodType>(
   const answer = jsonObjectsIn(text)
     .map((candidate) => tryParse(candidate))
     .filter((value) => value !== undefined)
-    .at(-1);
+    .at(0);
 
   if (answer === undefined) {
     throw new BrokerError(
